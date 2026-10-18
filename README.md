@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo/oxblend-logo.svg" width="160" alt="Oxblend logo"></p>
+
 # Oxblend
 
 Read, trace, pack and safely edit Blender `.blend` files without Blender.

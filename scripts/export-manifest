@@ -10,7 +10,7 @@ p=argparse.ArgumentParser();p.add_argument('--json',action='store_true');a=p.par
 root=Path(__file__).resolve().parents[1]
 tracked=subprocess.run(['git','ls-files','-z'],cwd=root,check=True,capture_output=True).stdout.decode().split('\0')
 exact={'Cargo.toml','Cargo.lock','LICENSE','NOTICE','README.md','AGENTS.md','CONTRIBUTING.md','.gitignore','scripts/qualify.sh','scripts/export-manifest','integration/file_ops_kit.py','THIRD-PARTY-NOTICES','deny.toml','scripts/third-party-notices','scripts/licence-gate.sh','scripts/no-network-check.sh','scripts/check-stability.py','scripts/release-build'}
-prefixes=('src/','newtests/','docs/','skills/oxblend/','tests/fixtures/','tests/support/')
+prefixes=('assets/logo/','src/','newtests/','docs/','skills/oxblend/','tests/fixtures/','tests/support/')
 selected=[]
 for name in tracked:
     if not name or name=='docs/RELEASE-CHECKLIST.md':continue
