@@ -1,0 +1,42 @@
+{
+  "author": "oxblend",
+  "scope": "synthetic serialized census and self-diff contracts",
+  "files": {
+    "allocated.blend": {
+      "bytes": 1692,
+      "sha256": "1700a716656aa850b046facc9b5bc3fc7f995da620532ea70d52a77acaf49d52"
+    },
+    "allocated-context.blend": {
+      "bytes": 1692,
+      "sha256": "cfeefea335120e9bd254e9768beeec0845437f8ddac83bc1256ae49b37342ab8"
+    },
+    "null.blend": {
+      "bytes": 1692,
+      "sha256": "9cfa870159dd066208a57fc1fb0f947007cffaed89327746511f5b3fac426ed9"
+    },
+    "dangling.blend": {
+      "bytes": 1692,
+      "sha256": "c25464f77cd3d14e0b2b46f7f4c4fdbe34a01495941998cc25224bf61ff6eb57"
+    },
+    "id-namespace.blend": {
+      "bytes": 1692,
+      "sha256": "32c0efc7008be3e89d4bf31e25f0e3b4fc64d49372205f2733e7d6f77d400f59"
+    },
+    "broken-first.blend": {
+      "bytes": 1692,
+      "sha256": "94779dd2f596ced0dc1ff9a7f01892b15bd7c83337250b85ddde20b4c9c07827"
+    },
+    "broken-last.blend": {
+      "bytes": 1692,
+      "sha256": "b8f219f596f89aa4d99f16482eba87b58b533fac63ff64b005bf00de631b5694"
+    },
+    "assets/live-asset.blend": {
+      "bytes": 1304,
+      "sha256": "18f55085c91a36c550166bafd4d8a8e9a93cc71c53a9cdacdcee2c4f2a1c41fc"
+    },
+    "assets/dangling-asset.blend": {
+      "bytes": 1304,
+      "sha256": "ccb4c0b22f71262a76df5be71d9a7ac5b51a42546f0f6a2d33ccefa06530002b"
+    }
+  }
+}

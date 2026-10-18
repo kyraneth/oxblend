@@ -1,0 +1,26 @@
+{
+  "author": "oxblend",
+  "scope": "portable serialized read/admission contracts; no native receiving claim",
+  "files": {
+    "unknown-id.blend": {
+      "bytes": 1726,
+      "sha256": "7310474555a4aac1f2785ff71d9320c0695d7ae0a0143e1e895a4087ee69fd95"
+    },
+    "data-before-id.blend": {
+      "bytes": 1758,
+      "sha256": "b952dd1100f7cd31fdffba4ab56b675f8a586c27dedc9750744e7ddccf6d1de8"
+    },
+    "data-after-control.blend": {
+      "bytes": 1782,
+      "sha256": "868a7d529217bf8854cf88cb91556ef0b5140ebed5c5321c7100a38ca95e5f82"
+    },
+    "raw-linked-id.blend": {
+      "bytes": 1618,
+      "sha256": "459c9a0bee2121f6b9d175a7b388f9563b462ba50917b3eb112854c253132128"
+    },
+    "data-after-placeholder.blend": {
+      "bytes": 1650,
+      "sha256": "23f2ab0358a299fc7bfdb46ca16b8c734e89102810e42f69ca81f415fd1c7558"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "author": "oxblend",
+  "version": [
+    4,
+    5,
+    8
+  ],
+  "scope": "Native serialized fixture types; saved UI matcap, file-name and sequencer-directory fields cleared; no evaluation claim",
+  "files": {
+    "crypto-image.blend": {
+      "bytes": 379230,
+      "sha256": "a1d62e94ea389e4445a5fc6426fd09e94b8f43c1d01215a0de27bdac7775a22a"
+    },
+    "crypto-scene.blend": {
+      "bytes": 377438,
+      "sha256": "1f78e6359d8841d6a29e00e841b83ba740aff5b4a88bfd3239b21e87ab59b655"
+    },
+    "empty-native-seed.blend": {
+      "bytes": 372102,
+      "sha256": "44782445f30efab09c2a361a08ada64a2686e3e6b26be75329fe3524ded6e535"
+    }
+  }
+}

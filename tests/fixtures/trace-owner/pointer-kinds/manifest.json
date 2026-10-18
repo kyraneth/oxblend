@@ -1,0 +1,42 @@
+{
+  "author": "oxblend",
+  "scope": "Synthetic serialization contracts, not native qualification or templates",
+  "files": {
+    "owner-id-alias.blend": {
+      "bytes": 1844,
+      "sha256": "1b1632b8c4c51f19dbd0f78afde72b3dbb3f186f796081b3dc5f2984659cdf61"
+    },
+    "data-only-id.blend": {
+      "bytes": 1844,
+      "sha256": "cf6ea6cd6203348efed8d78c3ae737f42667ea6a6a72e5141bc8f1810050d9e2"
+    },
+    "id-only-data.blend": {
+      "bytes": 1738,
+      "sha256": "254899ea5919cb22cd1baa5ed98281e76ac272f2202835d49a69629453d9367d"
+    },
+    "typed-id-data-alias.blend": {
+      "bytes": 1900,
+      "sha256": "f51efbb08b355717e0311790ce2458ba933c3c50b64c6d799cf901a775732a0e"
+    },
+    "typed-id-only-data.blend": {
+      "bytes": 1794,
+      "sha256": "887394f1bbbed0bc31b234ff4730a06e09ac29c58b225d7296ae9ca01246a47d"
+    },
+    "typed-data-only-id.blend": {
+      "bytes": 1900,
+      "sha256": "30525bed512333fc7636e2ac622a79a958f2cb32a8348a2d8aab16b74fc31662"
+    },
+    "material-pointer-table.blend": {
+      "bytes": 1748,
+      "sha256": "cc569465ae861045c1c1cd25ee919ca78f204ceecc9f35cec23c917a392ee618"
+    },
+    "selected-material-child.blend": {
+      "bytes": 3572,
+      "sha256": "7ef58cbf3dbe4127f88ed4b0f69c71683fa469d7debe87c67d3c8bb03fedc6b6"
+    },
+    "selected-material-root.blend": {
+      "bytes": 3036,
+      "sha256": "6ca9cefebe699943394aa1d95b0bf3c6613acd93f3fd39594d3780eeb359d089"
+    }
+  }
+}

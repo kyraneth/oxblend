@@ -1,0 +1,27 @@
+# cargo-deny configuration. `cargo deny check licenses` is the standard gate;
+# scripts/licence-gate.sh runs the same allowlist offline without cargo-deny and
+# additionally verifies that THIRD-PARTY-NOTICES is exactly what the vendored
+# licence texts produce.
+#
+# The qualified target is Linux x86_64. The locked graph is permissive only.
+[graph]
+targets = [{ triple = "x86_64-unknown-linux-gnu" }]
+
+[licenses]
+version = 2
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# zstd-sys choice: the crate declares BSD-3-Clause and vendors both ./LICENSE
+# (BSD 3-Clause) and ./LICENSE.BSD-3-Clause (Zstandard, Meta Platforms). Its
+# upstream tree also carries zstd/COPYING, the GPLv2 text for the upstream
+# command-line programs. Oxblend selects BSD-3-Clause and neither builds nor
+# distributes those programs (zstd-sys sets ZSTD_BUILD_PROGRAMS=OFF and builds
+# only the static libzstd). No exception entry is needed because BSD-3-Clause
+# is allowed outright; see THIRD-PARTY-NOTICES.

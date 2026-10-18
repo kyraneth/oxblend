@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Build deterministic Linux release assets with the installed Rust toolchain.
+
+Cargo honours rust-toolchain[.toml] when present. No tools are installed here.
+Requires Python 3.11+, Cargo, rustc, a C compiler and cached locked crates.
+"""
+import argparse
+import gzip
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+import tarfile
+import tomllib
+
+
+def run(*args):
+    return subprocess.check_output(args, cwd=root, env=env, text=True).strip()
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=Path, default=Path(".local-results/release"))
+args = parser.parse_args()
+root = Path(__file__).resolve().parents[1]
+if platform.system() != "Linux" or platform.machine() != "x86_64":
+    parser.error("release artifacts are qualified only on Linux x86_64")
+env = os.environ.copy()
+# Respect the caller's target/temp/cache directories, including offline builders.
+target = "x86_64-unknown-linux-gnu"
+target_dir = Path(env.get("CARGO_TARGET_DIR", root / "target")).resolve()
+env["CARGO_TARGET_DIR"] = str(target_dir)
+cargo_home = Path(env.get("CARGO_HOME", Path.home() / ".cargo")).resolve()
+# Do not inherit host-specific codegen flags into the distributable binary.
+env.pop("CARGO_ENCODED_RUSTFLAGS", None)
+env["RUSTFLAGS"] = " ".join(
+    f"--remap-path-prefix={source}={replacement}"
+    for source, replacement in (
+        (root, "/oxblend"), (target_dir, "/oxblend-target"),
+        (cargo_home, "/cargo"),
+    )
+)
+if any(" " in str(path) for path in (root, target_dir, cargo_home)):
+    parser.error("release build paths must not contain spaces (RUSTFLAGS encoding)")
+# A source archive without .git must supply the originating commit timestamp.
+if "SOURCE_DATE_EPOCH" not in env:
+    env["SOURCE_DATE_EPOCH"] = run("git", "log", "-1", "--format=%ct")
+epoch = int(env["SOURCE_DATE_EPOCH"])
+version = tomllib.loads((root / "Cargo.toml").read_text())["package"]["version"]
+stem = f"oxblend-{version}-{target}"
+out = args.output.resolve()
+out.mkdir(parents=True, exist_ok=True)
+print(f"Building {stem}; SOURCE_DATE_EPOCH={epoch}", flush=True)
+subprocess.run(["cargo", "build", "--release", "--target", target,
+                "--offline", "--locked"], cwd=root, env=env, check=True)
+binary = target_dir / target / "release/oxblend"
+assert run(str(binary), "--version") == f"oxblend {version}"
+metadata = json.loads(run("cargo", "metadata", "--format-version=1", "--offline",
+                          "--locked", "--filter-platform", target))
+lock = tomllib.loads((root / "Cargo.lock").read_text())
+checksums = {(p["name"], p["version"], p.get("source")): p.get("checksum")
+             for p in lock["package"]}
+packages = {p["id"]: p for p in metadata["packages"]}
+root_id = metadata["resolve"]["root"]
+refs = {key: f"pkg:cargo/{p['name']}@{p['version']}" for key, p in packages.items()}
+
+
+def component(key):
+    p = packages[key]
+    result = {"type": "application" if key == root_id else "library",
+              "bom-ref": refs[key], "purl": refs[key],
+              "name": p["name"], "version": p["version"]}
+    if p["license"]:
+        result["licenses"] = [{"expression": p["license"]}]
+    checksum = checksums[(p["name"], p["version"], p["source"])]
+    if checksum:
+        result["hashes"] = [{"alg": "SHA-256", "content": checksum}]
+    return result
+
+
+sbom = out / f"{stem}.cdx.json"
+write_json(sbom, {
+    "bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
+    "metadata": {"component": component(root_id),
+                 "properties": [{"name": "oxblend:sbom-scope", "value":
+                     "Offline Cargo metadata resolved graph for Linux x86_64; "
+                     "includes build dependencies, not system libraries or a vulnerability scan."}]},
+    "components": [component(key) for key in sorted(packages, key=refs.get) if key != root_id],
+    "dependencies": sorted(
+        [{"ref": refs[node["id"]], "dependsOn": sorted({refs[d["pkg"]] for d in node["deps"]})}
+         for node in metadata["resolve"]["nodes"]], key=lambda row: row["ref"]),
+})
+info = out / f"{stem}.build.json"
+write_json(info, {
+    "source_date_epoch": epoch, "target": target,
+    "rustc": run("rustc", "-Vv"), "cargo": run("cargo", "-V"),
+    "cc": run(env.get("CC", "cc"), "--version"),
+    "cargo_lock_sha256": hashlib.sha256((root / "Cargo.lock").read_bytes()).hexdigest(),
+    "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+    "note": "Reproduce with the same toolchain, C compiler, system libraries and source bytes; "
+            "no cross-toolchain or cross-distribution byte identity is promised.",
+})
+archive = out / f"{stem}.tar.gz"
+members = {"oxblend": binary}
+for name in ("LICENSE", "NOTICE", "THIRD-PARTY-NOTICES", "README.md", "AGENTS.md", "CONTRIBUTING.md", "skills/oxblend/SKILL.md"):
+    members[name] = root / name
+# Keep README documentation links usable in the extracted release too.
+for path in sorted((root / "docs").rglob("*")):
+    if path.is_file():
+        members[path.relative_to(root).as_posix()] = path
+members["BUILD-INFO.json"] = info
+with archive.open("wb") as raw:
+    with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+            for name, source in sorted(members.items()):
+                body = source.read_bytes()
+                entry = tarfile.TarInfo(f"{stem}/{name}")
+                entry.size = len(body)
+                entry.mtime = epoch
+                entry.mode = 0o755 if name == "oxblend" else 0o644
+                entry.uid = entry.gid = 0
+                entry.uname = entry.gname = ""
+                tar.addfile(entry, io.BytesIO(body))
+assets = sorted((archive, sbom, info))
+sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in assets)
+(out / "SHA256SUMS").write_text(sums)
+print(sums, end="")
+print(f"Release assets: {out}")

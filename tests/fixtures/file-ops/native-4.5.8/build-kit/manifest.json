@@ -1,0 +1,23 @@
+{
+  "author": "oxblend",
+  "version": [
+    4,
+    5,
+    8
+  ],
+  "scope": "Native serialized fixture types; saved UI matcap, file-name and sequencer-directory fields cleared; no evaluation claim",
+  "files": {
+    "constructors.blend": {
+      "bytes": 388487,
+      "sha256": "7a0e0e2ae62333914c82d24d6c369252523adb3bfba8e4cbbe3cb5d3781535b5"
+    },
+    "empty.blend": {
+      "bytes": 372102,
+      "sha256": "aabe5b9c4a61d5c05182fbc49993fdd4bcb998a211c8454703d72c2d5b8cc749"
+    },
+    "library.blend": {
+      "bytes": 374142,
+      "sha256": "b94c9a88be9bb685dd782dd48cda1cb871f8a3e5ddf8d6acecb6e69219302fa7"
+    }
+  }
+}

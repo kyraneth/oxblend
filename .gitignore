@@ -1,0 +1,10 @@
+# Private local input copies; source hashes/provenance only in version control.
+.local-inputs/
+.local-results/
+.venv/
+**/target/
+**/__pycache__/
+*.pyc
+*.blend
+*.blend1
+*.blend2

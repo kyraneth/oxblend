@@ -1,0 +1,18 @@
+{
+  "author": "oxblend",
+  "scope": "native owner grammar; synthetic serialized branch contracts only",
+  "files": {
+    "cross-id.blend": {
+      "bytes": 3518,
+      "sha256": "1f0a726e22820e7a14d20d8c591bda187d40e79cce34a8c8919cdefd052e5635"
+    },
+    "same-id.blend": {
+      "bytes": 4586,
+      "sha256": "e1de66fac5a48098b217e38907f314ac50ff6c88d60ea446ca41f925e3931783"
+    },
+    "foreign-only.blend": {
+      "bytes": 2450,
+      "sha256": "3cc82bc62b3f752ed81c190b73f37fba4a84023738aa129e3ed7c66b28aa7e37"
+    }
+  }
+}

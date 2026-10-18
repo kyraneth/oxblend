@@ -1,0 +1,615 @@
+//! Thin serialized reader/editor CLI. Complete output or typed partial report.
+use oxblend::value::{PathStep, Value, hex};
+use oxblend::{BlendFile, Error, Result};
+use serde_json::{Value as Json, json};
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
+use std::io::Write;
+
+fn output_error(error: std::io::Error) -> Error {
+    Error::new(
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            "broken_pipe"
+        } else {
+            "io"
+        },
+        error.to_string(),
+    )
+}
+macro_rules! println {
+    ($($arg:tt)*) => { writeln!(std::io::stdout().lock(), $($arg)*).map_err(output_error)? };
+}
+const USAGE: &str = "oxblend COMMAND [OPTIONS]\nCommands: summary inspect get pointer payload source-facts library-facts trace list blocks overrides diff edit rewrite pack pack-sequence exr-header pointer-census\nUse docs/USAGE.md for command arguments.";
+
+fn argument(v: &OsStr) -> Result<&str> {
+    v.to_str().ok_or_else(|| {
+        Error::new(
+            "usage",
+            "argument must be UTF-8 (file path may be arbitrary native bytes)",
+        )
+    })
+}
+fn integer(v: &OsStr) -> Result<usize> {
+    argument(v)?
+        .parse()
+        .map_err(|_| Error::new("usage", "nonnegative integer required"))
+}
+fn path(v: &OsStr) -> Result<Vec<PathStep>> {
+    let value: Json =
+        serde_json::from_str(argument(v)?).map_err(|e| Error::new("path", e.to_string()))?;
+    let items = value
+        .as_array()
+        .ok_or_else(|| Error::new("path", "JSON array required"))?;
+    items
+        .iter()
+        .map(|v| match v {
+            Json::String(s) => Ok(PathStep::Field(s.as_bytes().to_vec())),
+            Json::Number(n) => n
+                .as_u64()
+                .and_then(|i| usize::try_from(i).ok())
+                .map(PathStep::Index)
+                .ok_or_else(|| Error::new("path", "index must be nonnegative and fit usize")),
+            _ => Err(Error::new(
+                "path",
+                "only field strings and nonnegative integer indexes",
+            )),
+        })
+        .collect()
+}
+fn unhex(value: &Json) -> Result<Vec<u8>> {
+    let text = value
+        .as_str()
+        .ok_or_else(|| Error::new("edit_spec", "hex string required"))?;
+    if !text.len().is_multiple_of(2) || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Error::new("edit_spec", "even-length ASCII hex required"));
+    }
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let one = |v: u8| {
+                if v.is_ascii_digit() {
+                    v - b'0'
+                } else {
+                    v.to_ascii_lowercase() - b'a' + 10
+                }
+            };
+            Ok((one(pair[0]) << 4) | one(pair[1]))
+        })
+        .collect()
+}
+fn spec_index(value: &Json) -> Result<usize> {
+    value
+        .as_u64()
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| Error::new("edit_spec", "index must be a nonnegative usize"))
+}
+fn spec_keys(value: &Json, keys: &[&str]) -> Result<()> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::new("edit_spec", "object required"))?;
+    if object.keys().any(|key| !keys.contains(&key.as_str())) {
+        return Err(Error::new("edit_spec", "unknown specification field"));
+    }
+    Ok(())
+}
+fn rewrite_spec(value: &Json) -> Result<Vec<oxblend::edit::PathRewrite>> {
+    spec_keys(value, &["schema", "operation", "edits"])?;
+    if value["schema"] != 1 || value.get("operation").is_some_and(|v| v != "rewrite_paths") {
+        return Err(Error::new(
+            "edit_spec",
+            "schema1 rewrite_paths specification required",
+        ));
+    }
+    value["edits"]
+        .as_array()
+        .ok_or_else(|| Error::new("edit_spec", "edits array required"))?
+        .iter()
+        .map(|edit| {
+            spec_keys(
+                edit,
+                &[
+                    "block_index",
+                    "element",
+                    "path",
+                    "expected_path_hex",
+                    "replacement_path_hex",
+                ],
+            )?;
+            let steps = edit["path"]
+                .as_array()
+                .ok_or_else(|| Error::new("edit_spec", "path component array required"))?
+                .iter()
+                .map(|step| {
+                    spec_keys(step, &["field_hex", "index"])?;
+                    if step.as_object().is_none_or(|v| v.len() != 1) {
+                        return Err(Error::new("edit_spec", "one field_hex or index per step"));
+                    }
+                    if let Some(v) = step.get("field_hex") {
+                        Ok(PathStep::Field(unhex(v)?))
+                    } else {
+                        Ok(PathStep::Index(spec_index(&step["index"])?))
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(oxblend::edit::PathRewrite {
+                block_index: spec_index(&edit["block_index"])?,
+                element: spec_index(&edit["element"])?,
+                steps,
+                expected_path: unhex(&edit["expected_path_hex"])?,
+                replacement_path: unhex(&edit["replacement_path_hex"])?,
+            })
+        })
+        .collect()
+}
+fn text(file: &BlendFile, block: usize, names: &[&str]) -> Result<String> {
+    let steps: Vec<_> = names
+        .iter()
+        .map(|s| PathStep::Field(s.as_bytes().to_vec()))
+        .collect();
+    Ok(file.get(block, 0, &steps, true)?.utf8()?.to_owned())
+}
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod main_tests;
+
+fn id_name(file: &BlendFile, block: usize) -> Result<String> {
+    let si = file.struct_index(block)?;
+    if file.schema().types[file.schema().structs[si].type_index] == b"ID" {
+        text(file, block, &["name"])
+    } else {
+        text(file, block, &["id", "name"])
+    }
+}
+fn summary(file: &BlendFile) -> Result<Json> {
+    let mut codes = BTreeMap::<String, usize>::new();
+    let mut objects = Vec::new();
+    let mut scenes = Vec::new();
+    for (index, block) in file.blocks().iter().enumerate() {
+        let code = block.code.split(|&b| b == 0).next().unwrap_or(&[]);
+        let code =
+            std::str::from_utf8(code).map_err(|_| Error::new("encoding", "block code UTF-8"))?;
+        *codes.entry(code.to_owned()).or_default() += 1;
+        if code == "OB" {
+            objects.push(id_name(file, index)?);
+        }
+        if code == "SC" {
+            let frame = match file.get(
+                index,
+                0,
+                &[
+                    PathStep::Field(b"r".to_vec()),
+                    PathStep::Field(b"efra".to_vec()),
+                ],
+                true,
+            )? {
+                Value::Signed(v) => v,
+                _ => return Err(Error::new("type", "frame end not signed integer")),
+            };
+            let camera = file
+                .get_pointer(index, 0, &[PathStep::Field(b"camera".to_vec())])?
+                .map(|target| id_name(file, target))
+                .transpose()?;
+            scenes.push(json!({"name":id_name(file, index)?, "frame_end":frame, "camera":camera}));
+        }
+    }
+    let header = file.header();
+    Ok(
+        json!({"schema":1, "header":{"version":header.version, "pointer_size":header.pointer_size,
+        "little_endian":header.little_endian, "file_format":header.file_format},
+        "block_codes":codes, "objects":objects, "scenes":scenes}),
+    )
+}
+fn signature(path: &std::path::Path) -> Result<Json> {
+    let metadata = path.metadata().map_err(output_error)?;
+    let modified = metadata
+        .modified()
+        .map_err(|e| Error::new("io", e.to_string()))?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| Error::new("io", e.to_string()))?;
+    Ok(
+        json!({"path_hex":hex(path.as_os_str().as_encoded_bytes()), "size_decimal":metadata.len().to_string(),
+        "mtime_ns_decimal":modified.as_nanos().to_string()}),
+    )
+}
+fn durability(value: &OsString) -> Result<oxblend::edit::Durability> {
+    argument(value)?
+        .parse()
+        .map_err(|e: Error| Error::new("usage", e.message))
+}
+fn run(args: &[OsString]) -> Result<()> {
+    let command = args.get(1).ok_or_else(|| Error::new("usage", USAGE))?;
+    let command = argument(command)?;
+    if command == "--help" || command == "-h" {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    if command == "--version" || command == "-V" {
+        println!("oxblend {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if command == "diff" {
+        if args.len() != 4 {
+            return Err(Error::new("usage", "diff A.blend B.blend"));
+        }
+        let report = oxblend::diff::compare(
+            std::path::Path::new(&args[2]),
+            std::path::Path::new(&args[3]),
+        )?;
+        println!("{report}");
+        if report["complete"] != true {
+            return Err(Error::new(
+                "incomplete_diff",
+                "all unanchored/persistent unresolved allocations are listed; no equality claim",
+            ));
+        }
+        return Ok(());
+    }
+    if command == "exr-header" {
+        if args.len() != 3 {
+            return Err(Error::new("usage", "exr-header INPUT"));
+        }
+        let header = oxblend::exr_header::read(std::path::Path::new(&args[2]))?;
+        println!("{}", header.json());
+        return Ok(());
+    }
+    if command == "pointer-census" {
+        let input = args
+            .get(2)
+            .ok_or_else(|| Error::new("usage", "pointer-census INPUT [--full]"))?;
+        if args.len() > 4 || args.get(3).is_some_and(|v| v != "--full") {
+            return Err(Error::new("usage", "pointer-census INPUT [--full]"));
+        }
+        let file = BlendFile::open(std::path::Path::new(input))?;
+        let report = oxblend::file_ops::pointer_census(&file)?;
+        println!("{}", report.json(args.len() == 4));
+        return Ok(());
+    }
+    if matches!(command, "list" | "blocks") {
+        return oxblend::bat_cli::run(command, &args[2..]);
+    }
+    if command == "pack" || command == "pack-sequence" {
+        let (inputs, target, options) = oxblend::bat_cli::pack_arguments(command, &args[2..])?;
+        let report = oxblend::pack::pack(&inputs, &target, &options)?;
+        println!("{}", report.json());
+        if !report.complete {
+            return Err(Error::new(
+                "incomplete_pack",
+                "inspect strict pack report; partial files may remain, never merge/resume",
+            ));
+        }
+        return Ok(());
+    }
+    if command == "edit" {
+        let input = args.get(2).ok_or_else(|| {
+            Error::new(
+                "usage",
+                "edit INPUT --output NEW --spec JSON --mode format-only|comp",
+            )
+        })?;
+        let (mut output, mut spec, mut mode, mut policy) = (None, None, None, None);
+        let mut options = args[3..].iter();
+        while let Some(option) = options.next() {
+            let slot = match argument(option)? {
+                "--output" if output.is_none() => &mut output,
+                "--spec" if spec.is_none() => &mut spec,
+                "--mode" if mode.is_none() => &mut mode,
+                "--durability" if policy.is_none() => &mut policy,
+                _ => return Err(Error::new("usage", "unknown or duplicate edit option")),
+            };
+            *slot = Some(
+                options
+                    .next()
+                    .ok_or_else(|| Error::new("usage", "edit option requires a value"))?,
+            );
+        }
+        let output = output.ok_or_else(|| Error::new("usage", "--output required"))?;
+        let spec = spec.ok_or_else(|| Error::new("usage", "--spec required"))?;
+        let mode =
+            match argument(mode.ok_or_else(|| Error::new("usage", "explicit --mode required"))?)? {
+                "format-only" => oxblend::typed_edit::EditMode::FormatOnly,
+                "comp" => oxblend::typed_edit::EditMode::Comp,
+                _ => return Err(Error::new("usage", "--mode format-only|comp required")),
+            };
+        let value: Json = serde_json::from_slice(
+            &std::fs::read(spec).map_err(|e| Error::new("io", e.to_string()))?,
+        )
+        .map_err(|e| Error::new("edit_spec", e.to_string()))?;
+        let snapshot = oxblend::typed_edit::snapshot(std::path::Path::new(input))?;
+        let plan = oxblend::typed_spec::plan(&snapshot, &value, mode)?;
+        let report = oxblend::typed_edit::write_plan(
+            &snapshot,
+            &plan,
+            std::path::Path::new(output),
+            &oxblend::edit::EditOptions::new(
+                policy.map(durability).transpose()?.unwrap_or_default(),
+            ),
+        )?;
+        let encoded = serde_json::to_vec(&report.json())
+            .map_err(|e| Error::new("serialization", e.to_string()))?;
+        let mut out = std::io::stdout().lock();
+        out.write_all(&encoded)
+            .and_then(|_| out.write_all(b"\n"))
+            .and_then(|_| out.flush())
+            .map_err(output_error)?;
+        if !report.complete {
+            return Err(Error::new(
+                "incomplete_edit",
+                "inspect typed report publication/durability errors",
+            ));
+        }
+        return Ok(());
+    }
+    if command == "rewrite" {
+        let input = args
+            .get(2)
+            .ok_or_else(|| Error::new("usage", "rewrite INPUT --output NEW --edits SPEC"))?;
+        let (mut output, mut specification, mut selected_durability) = (None, None, None);
+        let mut options = args[3..].iter();
+        while let Some(option) = options.next() {
+            let slot = match argument(option)? {
+                "--output" if output.is_none() => &mut output,
+                "--edits" if specification.is_none() => &mut specification,
+                "--durability" if selected_durability.is_none() => &mut selected_durability,
+                _ => return Err(Error::new("usage", "unknown or duplicate rewrite option")),
+            };
+            *slot = Some(
+                options
+                    .next()
+                    .ok_or_else(|| Error::new("usage", "rewrite option needs a value"))?,
+            );
+        }
+        let output = output.ok_or_else(|| Error::new("usage", "--output required"))?;
+        let specification = specification.ok_or_else(|| Error::new("usage", "--edits required"))?;
+        let data = std::fs::read(specification).map_err(output_error)?;
+        let value: Json =
+            serde_json::from_slice(&data).map_err(|e| Error::new("edit_spec", e.to_string()))?;
+        let edits = rewrite_spec(&value)?;
+        let report = oxblend::edit::rewrite_paths(
+            std::path::Path::new(input),
+            std::path::Path::new(output),
+            &edits,
+            &oxblend::edit::EditOptions::new(
+                selected_durability
+                    .map(durability)
+                    .transpose()?
+                    .unwrap_or_default(),
+            ),
+        )?;
+        let encoded = serde_json::to_vec(&report.json())
+            .map_err(|e| Error::new("serialization", e.to_string()))?;
+        let mut out = std::io::stdout().lock();
+        out.write_all(&encoded)
+            .and_then(|_| out.write_all(b"\n"))
+            .and_then(|_| out.flush())
+            .map_err(output_error)?;
+        if !report.complete {
+            return Err(Error::new(
+                "incomplete_edit",
+                "inspect report.errors; no complete output published",
+            ));
+        }
+        return Ok(());
+    }
+    if command == "overrides" {
+        use oxblend::overrides::{OverrideOptions, OverrideScope, trace_overrides};
+        use oxblend::trace::PointerMode;
+        let input = args.get(2).ok_or_else(|| {
+            Error::new(
+                "usage",
+                "overrides FILE [--root-only|--recursive] [--strict|--non-strict] [--json]",
+            )
+        })?;
+        let mut options = OverrideOptions::default();
+        let (mut scope, mut pointers, mut json_option) = (false, false, false);
+        for option in &args[3..] {
+            match argument(option)? {
+                "--root-only" | "--recursive" if !scope => {
+                    options.scope = if option == "--root-only" {
+                        OverrideScope::RootFile
+                    } else {
+                        OverrideScope::Recursive
+                    };
+                    scope = true;
+                }
+                "--strict" | "--non-strict" if !pointers => {
+                    options.pointers = if option == "--strict" {
+                        PointerMode::Strict
+                    } else {
+                        PointerMode::NonStrict
+                    };
+                    pointers = true;
+                }
+                "--json" if !json_option => json_option = true,
+                _ => return Err(Error::new("usage", "unknown or duplicate overrides option")),
+            }
+        }
+        let start = std::time::Instant::now();
+        let report = trace_overrides(std::path::Path::new(input), options)?;
+        let query = start.elapsed().as_secs_f64();
+        let serialization = std::time::Instant::now();
+        let encoded = serde_json::to_vec(&report.json())
+            .map_err(|e| Error::new("serialization", e.to_string()))?;
+        let mut out = std::io::stdout().lock();
+        out.write_all(&encoded)
+            .and_then(|_| out.write_all(b"\n"))
+            .and_then(|_| out.flush())
+            .map_err(output_error)?;
+        writeln!(std::io::stderr().lock(), "{}", json!({"overrides_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(|e|Error::new("io",e.to_string()))?;
+        if !report.complete {
+            return Err(Error::new(
+                "incomplete_overrides",
+                "inspect report.errors; partial output is not success",
+            ));
+        }
+        return Ok(());
+    }
+    if command == "trace" {
+        use oxblend::trace::{PointerMode, TraceMode, TraceOptions, trace};
+        let input = args.get(2).ok_or_else(|| {
+            Error::new(
+                "usage",
+                "trace FILE [--per-file|--recursive] [--strict|--non-strict] [--low-memory]",
+            )
+        })?;
+        let mut mode = TraceMode::Recursive;
+        let mut pointers = PointerMode::Strict;
+        let mut seen_mode = false;
+        let mut seen_pointers = false;
+        let mut low_memory = false;
+        for option in &args[3..] {
+            match argument(option)? {
+                "--per-file" | "--recursive" if !seen_mode => {
+                    mode = if option == "--per-file" {
+                        TraceMode::PerFile
+                    } else {
+                        TraceMode::Recursive
+                    };
+                    seen_mode = true;
+                }
+                "--strict" | "--non-strict" if !seen_pointers => {
+                    pointers = if option == "--strict" {
+                        PointerMode::Strict
+                    } else {
+                        PointerMode::NonStrict
+                    };
+                    seen_pointers = true;
+                }
+                "--low-memory" if !low_memory => low_memory = true,
+                _ => return Err(Error::new("usage", "unknown or duplicate trace option")),
+            }
+        }
+        let start = std::time::Instant::now();
+        let mut options = TraceOptions::new(mode, pointers);
+        options.low_memory = low_memory;
+        let report = trace(std::path::Path::new(input), options)?;
+        let query = start.elapsed().as_secs_f64();
+        let serialization = std::time::Instant::now();
+        let encoded = serde_json::to_vec(&report.json())
+            .map_err(|e| Error::new("serialization", e.to_string()))?;
+        let mut out = std::io::stdout().lock();
+        out.write_all(&encoded)
+            .and_then(|_| out.write_all(b"\n"))
+            .and_then(|_| out.flush())
+            .map_err(output_error)?;
+        writeln!(std::io::stderr().lock(),"{}",json!({"trace_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(|e|Error::new("io",e.to_string()))?;
+        if !report.complete {
+            return Err(Error::new(
+                "incomplete_trace",
+                "inspect report.errors; partial output is not success",
+            ));
+        }
+        return Ok(());
+    }
+    let (element, raw, field_path, block) = match command {
+        "summary" | "inspect" | "library-facts" | "source-facts" if args.len() == 3 => {
+            (0, false, Vec::new(), 0)
+        }
+        "payload" if args.len() == 4 => (0, false, Vec::new(), integer(&args[3])?),
+        "get" | "pointer" if args.len() >= 5 && args.len() <= 7 => {
+            let mut element = 0;
+            let mut raw = false;
+            let mut seen_element = false;
+            for arg in &args[5..] {
+                if arg == "--raw" && command == "get" && !raw {
+                    raw = true;
+                } else if !seen_element {
+                    element = integer(arg)?;
+                    seen_element = true;
+                } else {
+                    return Err(Error::new("usage", "duplicate/unknown option"));
+                }
+            }
+            (element, raw, path(&args[4])?, integer(&args[3])?)
+        }
+        _ => return Err(Error::new("usage", "unknown command or argument count")),
+    };
+    let start = std::time::Instant::now();
+    let facts_query = matches!(command, "library-facts" | "source-facts");
+    let owned_path = if facts_query {
+        Some(std::fs::canonicalize(&args[2]).map_err(|e| Error::new("io", e.to_string()))?)
+    } else {
+        None
+    };
+    let input_signature = owned_path.as_ref().map(|p| signature(p)).transpose()?;
+    let file = BlendFile::open(
+        owned_path
+            .as_ref()
+            .map(|p| p.as_os_str())
+            .unwrap_or(&args[2]),
+    )?;
+    let opened = start.elapsed().as_secs_f64();
+    let output = match command {
+        "summary" => summary(&file)?,
+        "library-facts" | "source-facts" => {
+            let facts = if command == "source-facts" {
+                oxblend::facts::source_facts(&file)?
+            } else {
+                oxblend::facts::library_facts(&file)?
+            };
+            json!({"schema":1, "query":command, "semantic":if command == "source-facts" {"oxblend-source-1"} else {"oxblend-library-1"},
+                "reader":{"name":"oxblend", "version":env!("CARGO_PKG_VERSION"), "python_reference":"BAT-1.23"},
+                "input":input_signature, "stats":{"decompressed_bytes":file.decompressed_len(),
+                    "indexed_blocks":file.blocks().len(), "fact_blocks":facts["blocks"].as_object().map_or(0, |b| b.len())}, "facts":facts})
+        }
+        "get" => json!({"schema":1, "value":file.get(block, element, &field_path, !raw)?.json()}),
+        "payload" => {
+            json!({"schema":1, "value":Value::Bytes(file.payload(block)?.to_vec()).json()})
+        }
+        "pointer" => {
+            json!({"schema":1, "block_index":file.get_pointer(block, element, &field_path)?})
+        }
+        "inspect" => {
+            let header = file.header();
+            json!({"schema":1, "header":{"version":header.version, "pointer_size":header.pointer_size,
+                "little_endian":header.little_endian, "file_format":header.file_format},
+                "blocks":file.blocks().iter().map(|b| json!({"code_hex":hex(&b.code), "address_decimal":b.old_address.to_string(),
+                    "sdna_index":b.sdna_index, "count":b.count, "size":b.size, "data_offset":b.data_offset})).collect::<Vec<_>>(),
+                "sdna":{"names_hex":file.schema().names.iter().map(|v| hex(v)).collect::<Vec<_>>(),
+                    "types_hex":file.schema().types.iter().map(|v| hex(v)).collect::<Vec<_>>(), "lengths":file.schema().lengths,
+                    "structs":file.schema().structs.iter().map(|s| json!({"type_index":s.type_index,
+                        "fields":s.fields.iter().map(|f| json!({"name_hex":hex(&f.name), "full_name_hex":hex(&f.full_name),
+                            "type_index":f.type_index, "offset":f.offset, "size":f.size, "array_len":f.array_len,
+                            "element_size":f.element_size, "pointer":f.pointer})).collect::<Vec<_>>() })).collect::<Vec<_>>()}})
+        }
+        _ => return Err(Error::new("usage", "command")),
+    };
+    if let Some(path) = owned_path.as_ref()
+        && Some(signature(path)?) != input_signature
+    {
+        return Err(Error::new(
+            "input_changed",
+            "source changed during per-file fact extraction",
+        ));
+    }
+    let query = start.elapsed().as_secs_f64() - opened;
+    let serialization = std::time::Instant::now();
+    let encoded =
+        serde_json::to_vec(&output).map_err(|e| Error::new("serialization", e.to_string()))?;
+    let mut out = std::io::stdout().lock();
+    out.write_all(&encoded)
+        .and_then(|_| out.write_all(b"\n"))
+        .and_then(|_| out.flush())
+        .map_err(output_error)?;
+    let phases = json!({"open_index_seconds":opened, "query_seconds":query, "serialize_write_seconds":serialization.elapsed().as_secs_f64()});
+    writeln!(std::io::stderr().lock(), "{phases}").map_err(output_error)?;
+    Ok(())
+}
+fn main() {
+    if let Err(error) = run(&std::env::args_os().collect::<Vec<_>>()) {
+        if error.kind == "broken_pipe" {
+            return;
+        }
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "{}",
+            json!({"schema":1,"error":{"kind":error.kind,"message":error.message}})
+        );
+        std::process::exit(if error.kind == "pack_project" {
+            5
+        } else if error.kind == "pack_input" || error.kind == "missing_input" {
+            3
+        } else {
+            2
+        });
+    }
+}

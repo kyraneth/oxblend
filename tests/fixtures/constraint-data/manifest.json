@@ -1,0 +1,116 @@
+{
+  "author": "oxblend",
+  "Blender_generated": false,
+  "files": [
+    {
+      "path": "normal.blend",
+      "sha256": "5bb85fb5c2c53b47688ae7a9131eeb850ee6c4b2fd9efcad288f180c6d119512",
+      "bytes": 1736
+    },
+    {
+      "path": "normal-root.blend",
+      "sha256": "003dd761e307dada3bd26f8161765ccf30dfd002f1d9987d81ec4c479a0a4e5c",
+      "bytes": 880
+    },
+    {
+      "path": "tar.blend",
+      "sha256": "5dff44af68859650af26b0cc4d9b5e4c4dfca632a9eed69ddc34780004750831",
+      "bytes": 670
+    },
+    {
+      "path": "act.blend",
+      "sha256": "de0fea5892ae8c9082244a004a774a3cbc1851f9b3734f3908ffd80066bf5a1f",
+      "bytes": 654
+    },
+    {
+      "path": "extent.blend",
+      "sha256": "fa059859e361bd7f2ec68094b38121fad73ad825d474ffcd999db7a3e85fee6e",
+      "bytes": 1737
+    },
+    {
+      "path": "extent-root.blend",
+      "sha256": "1de24e66aea36a11e2bf187cf15865154c8f6754d064e73672e754ada188975c",
+      "bytes": 880
+    },
+    {
+      "path": "driver-extent.blend",
+      "sha256": "7a2f7747e4136f33bdf019aaafb4babdc628f9303acb1460b0c5bf2939e892fc",
+      "bytes": 1737
+    },
+    {
+      "path": "driver-extent-root.blend",
+      "sha256": "9ec2682cbc37633015cdca648d4810ea1dccde7890def7ebb2acf03e5fb29512",
+      "bytes": 880
+    },
+    {
+      "path": "void.blend",
+      "sha256": "c08a3c3dbfb7888f4bc510c1f89d6a9638bb03d63cb5011b3731334841dcd228",
+      "bytes": 1756
+    },
+    {
+      "path": "void-root.blend",
+      "sha256": "7fca1242cef6862af8e3e2f03dbf4b2144a9d3bdde64304e18b56fa5d0e1a5dd",
+      "bytes": 892
+    },
+    {
+      "path": "path.blend",
+      "sha256": "6eeaf4ba6d18dfcec4fb3f94525c98f10e5d4daa622de11647478180a1d0151a",
+      "bytes": 1884
+    },
+    {
+      "path": "path-root.blend",
+      "sha256": "b107436be02bc0889da824aaea9032b9eb836a7689819ae6e3cea6b9006279e6",
+      "bytes": 900
+    },
+    {
+      "path": "reciprocity.blend",
+      "sha256": "e0e97ae7049ce094fa22429f2d88091a00bfaae6778f1372301730898b75d074",
+      "bytes": 1736
+    },
+    {
+      "path": "reciprocity-root.blend",
+      "sha256": "fcf7747d4bc1dd77a02eac35da61993bf32e323a12032110f172f62801e32733",
+      "bytes": 880
+    },
+    {
+      "path": "last.blend",
+      "sha256": "b0198117bce889dee26c8f51ec478d0913ea3c6267b2823678463e0e129a60a9",
+      "bytes": 1736
+    },
+    {
+      "path": "last-root.blend",
+      "sha256": "1575cfff025090dcf0e56fa471ddf09d882f16c4d27044c75aa72c41659412bd",
+      "bytes": 880
+    },
+    {
+      "path": "cycle.blend",
+      "sha256": "015e842b15afcf289c5a38e9f2b85b1549e4392f1361490bd9a1d4c251c3063e",
+      "bytes": 1736
+    },
+    {
+      "path": "cycle-root.blend",
+      "sha256": "9c3f5e373ca234c75d61878d30f8dec994dd343092f962d52be86d89d1f021a9",
+      "bytes": 880
+    },
+    {
+      "path": "sibling.blend",
+      "sha256": "709b50c1a82c60349377e62769fa710e33906b40c2e04c127c1f764818129da2",
+      "bytes": 1736
+    },
+    {
+      "path": "sibling-root.blend",
+      "sha256": "2a2063b9227f0476cdf439fd83c4e14c895e082d1ba0fd7d4854008cf6e12e39",
+      "bytes": 880
+    },
+    {
+      "path": "dangling.blend",
+      "sha256": "99abb53032f43837b9c81b473c2b4fbfed2870d06ba8c83a62831acc37dc329d",
+      "bytes": 1736
+    },
+    {
+      "path": "dangling-root.blend",
+      "sha256": "c98a40546f0ba70814f1ffff5e244522ba58bd61d7338f6ab372c451f9d8edc5",
+      "bytes": 880
+    }
+  ]
+}

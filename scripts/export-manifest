@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Print the public, fixture-aware repository file list. Does not export files.
+
+Selected bytes are always the repository bytes: no content transformations.
+Use --json for path/body hashes. The manifest itself is ordinary public source.
+"""
+import argparse, hashlib, json, subprocess
+from pathlib import Path
+p=argparse.ArgumentParser();p.add_argument('--json',action='store_true');a=p.parse_args()
+root=Path(__file__).resolve().parents[1]
+tracked=subprocess.run(['git','ls-files','-z'],cwd=root,check=True,capture_output=True).stdout.decode().split('\0')
+exact={'Cargo.toml','Cargo.lock','LICENSE','NOTICE','README.md','AGENTS.md','CONTRIBUTING.md','.gitignore','scripts/qualify.sh','scripts/export-manifest','integration/file_ops_kit.py','THIRD-PARTY-NOTICES','deny.toml','scripts/third-party-notices','scripts/licence-gate.sh','scripts/no-network-check.sh','scripts/check-stability.py','scripts/release-build'}
+prefixes=('src/','newtests/','docs/','skills/oxblend/','tests/fixtures/','tests/support/')
+selected=[]
+for name in tracked:
+    if not name or name=='docs/RELEASE-CHECKLIST.md':continue
+    if name in exact or name.startswith(prefixes) or name.startswith(('tests/','examples/')) and '/' not in name.split('/',1)[1] and name.endswith('.rs'):
+        path=root/name
+        if not path.is_file() or path.is_symlink():raise RuntimeError('missing or symlink selection '+name)
+        selected.append(name)
+selected.sort()
+# Compile-referenced fixtures and explicit module paths are owned source.
+# Check the selected Rust files, including integration tests and their helpers.
+for source in [root/name for name in selected if name.endswith('.rs')]:
+    import re
+    for relative in re.findall(r'(?:include_(?:bytes|str)!\(\s*"|#\[\s*path\s*=\s*")([^"]+)"',source.read_text()):
+        name=str((source.parent/relative).resolve().relative_to(root))
+        if name not in selected:raise RuntimeError('compile-referenced file absent: '+name)
+if a.json:
+    print(json.dumps({'author':'oxblend','transforms':False,'files':[{'path':name,'bytes':(root/name).stat().st_size,'sha256':hashlib.sha256((root/name).read_bytes()).hexdigest()} for name in selected]},indent=2))
+else:
+    print('\n'.join(selected))

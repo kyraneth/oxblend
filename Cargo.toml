@@ -1,0 +1,29 @@
+[package]
+name = "oxblend"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.94"
+publish = true
+license = "MIT"
+description = "Read, trace and safely edit serialized Blender files without starting Blender"
+readme = "README.md"
+authors = ["kyraneth"]
+repository = "https://github.com/kyraneth/oxblend"
+homepage = "https://github.com/kyraneth/oxblend"
+# Publish only the standalone public source, never local evidence or development state.
+include = [
+    "/Cargo.toml", "/Cargo.lock", "/README.md", "/AGENTS.md", "/LICENSE", "/NOTICE",
+    "/THIRD-PARTY-NOTICES", "/CONTRIBUTING.md", "/deny.toml",
+    "/src/**", "/newtests/**", "/tests/*.rs", "/tests/fixtures/**",
+    "/tests/support/**", "/examples/*.rs", "/docs/ARCHITECTURE.md",
+    "/docs/FILE-FORMAT.md", "/docs/LICENSE.md", "/docs/MAINTAINING.md",
+    "/docs/RELEASE-NOTES.md", "/docs/STABILITY.md", "/docs/USAGE.md",
+    "/scripts/**", "/skills/oxblend/**", "/integration/file_ops_kit.py",
+]
+
+[dependencies]
+# Linux unnamed tempfile/read-at backing; exact version already in the lockfile.
+libc = "=0.2.190"
+flate2 = "=1.1.10"
+zstd = "=0.14.0"
+serde_json = "=1.0.150"
