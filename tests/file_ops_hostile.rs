@@ -145,4 +145,8 @@ fn incomplete_diff_never_claims_equal() {
         .unwrap();
     assert_eq!(d["complete"], false);
     assert!(d["equal"].is_null());
+    assert_eq!(
+        d["difference_count"],
+        d["differences"].as_array().unwrap().len()
+    );
 }

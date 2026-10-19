@@ -76,9 +76,11 @@ pub struct EditReport {
 }
 impl EditReport {
     pub fn json(&self) -> Json {
-        json!({"schema":1,"operation":"rewrite_paths","input_path_hex":hex(&self.input_path),"output_path_hex":hex(&self.output_path),"container_family":self.container_family,"input_physical_length":self.input_physical_length,"output_physical_length":self.output_physical_length,"input_decoded_length":self.input_decoded_length,"output_decoded_length":self.output_decoded_length,"container_reencoded":self.container_reencoded,"output_decoder_verified":self.output_decoder_verified,"output_written":self.output_written,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"complete":self.complete,
+        crate::value::with_text(
+            json!({"schema":1,"operation":"rewrite_paths","input_path_hex":hex(&self.input_path),"output_path_hex":hex(&self.output_path),"container_family":self.container_family,"input_physical_length":self.input_physical_length,"output_physical_length":self.output_physical_length,"input_decoded_length":self.input_decoded_length,"output_decoded_length":self.output_decoded_length,"container_reencoded":self.container_reencoded,"output_decoder_verified":self.output_decoder_verified,"output_written":self.output_written,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"complete":self.complete,
         "edits":self.edits.iter().map(|e|json!({"edit_index":e.edit_index,"block_index":e.block_index,"element":e.element,"steps":e.steps.iter().map(|s|match s {PathStep::Field(v)=>json!({"field_hex":hex(v)}),PathStep::Index(v)=>json!({"index":v})}).collect::<Vec<_>>(),"offset":e.offset,"capacity":e.capacity,"write_length":e.write_length,"before_path_hex":hex(&e.before_path),"after_path_hex":hex(&e.after_path)})).collect::<Vec<_>>(),
-        "errors":self.errors.iter().map(|e|json!({"edit_index":e.edit_index,"kind":e.kind,"message":e.message})).collect::<Vec<_>>()})
+        "errors":self.errors.iter().map(|e|json!({"edit_index":e.edit_index,"kind":e.kind,"message":e.message})).collect::<Vec<_>>()}),
+        )
     }
     fn fail(&mut self, index: Option<usize>, e: Error) {
         self.errors.push(EditFailure {
@@ -169,6 +171,12 @@ fn import_path(reader: &BlendFile, edit: &PathRewrite) -> Result<bool> {
 fn validate(reader: &BlendFile, edit: &PathRewrite, index: usize) -> Result<EditRange> {
     let location = reader.locate_field(edit.block_index, edit.element, &edit.steps)?;
     let field = location.field;
+    if location.parent_type == b"ID" && field.name == b"name" {
+        return Err(Error::new(
+            "unsupported_edit",
+            "ID name fields are not editable; only whitelisted filepath fields are",
+        ));
+    }
     if field.pointer {
         return Err(Error::new(
             "pointer_write",
@@ -195,8 +203,8 @@ fn validate(reader: &BlendFile, edit: &PathRewrite, index: usize) -> Result<Edit
             "unsupported_edit",
             format!(
                 "not a whitelisted literal path: {}.{}",
-                hex(location.parent_type),
-                hex(&field.name)
+                crate::value::display_bytes(location.parent_type),
+                crate::value::display_bytes(&field.name)
             ),
         ));
     }

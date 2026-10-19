@@ -75,7 +75,7 @@ pub struct EditReportV2 {
 }
 impl EditReportV2 {
     pub fn json(&self) -> Json {
-        self.details.clone()
+        crate::value::with_text(self.details.clone())
     }
 }
 
@@ -269,6 +269,12 @@ fn candidate<'a>(
     }
     let f = s.reader();
     let loc = f.locate_field(field.block, field.element, &field.steps)?;
+    if loc.parent_type == b"ID" && loc.field.name == b"name" {
+        return Err(Error::new(
+            "unsupported_edit",
+            "ID name fields are not editable; only whitelisted filepath fields are",
+        ));
+    }
     if loc.field.name.starts_with(b"_pad")
         || loc.field.name == b"pad"
         || loc
@@ -427,8 +433,8 @@ fn profile(s: &EditSnapshot, w: &TypedWrite<'_>) -> Result<&'static str> {
                 "profile_field",
                 format!(
                     "unqualified comp field {}.{}",
-                    hex(loc.parent_type),
-                    hex(&loc.field.name)
+                    crate::value::display_bytes(loc.parent_type),
+                    crate::value::display_bytes(&loc.field.name)
                 ),
             ));
         }

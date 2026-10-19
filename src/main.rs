@@ -19,7 +19,7 @@ fn output_error(error: std::io::Error) -> Error {
 macro_rules! println {
     ($($arg:tt)*) => { writeln!(std::io::stdout().lock(), $($arg)*).map_err(output_error)? };
 }
-const USAGE: &str = "oxblend COMMAND [OPTIONS]\nCommands: summary inspect get pointer payload source-facts library-facts trace list blocks overrides diff edit rewrite pack pack-sequence exr-header pointer-census\nUse docs/USAGE.md for command arguments.";
+const USAGE: &str = "oxblend COMMAND [OPTIONS]\nCommands: summary inspect get pointer payload source-facts library-facts trace list blocks overrides diff edit rewrite pack pack-sequence exr-header pointer-census\nUse oxblend COMMAND --help for arguments; docs/USAGE.md for contracts.";
 
 fn argument(v: &OsStr) -> Result<&str> {
     v.to_str().ok_or_else(|| {
@@ -163,40 +163,83 @@ fn id_name(file: &BlendFile, block: usize) -> Result<String> {
 fn summary(file: &BlendFile) -> Result<Json> {
     let mut codes = BTreeMap::<String, usize>::new();
     let mut objects = Vec::new();
+    let mut materials = Vec::new();
+    let mut meshes = Vec::new();
+    let mut images = Vec::new();
+    let mut collections = Vec::new();
+    let mut warnings = Vec::new();
     let mut scenes = Vec::new();
+    fn partial<T>(
+        result: Result<T>,
+        warnings: &mut Vec<Json>,
+        block: usize,
+        field: &str,
+    ) -> Result<Option<T>> {
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if error.kind == "missing_field" => {
+                warnings.push(json!({"kind":"missing_field", "block_index":block, "field":field,
+                    "message":format!("summary block {block}, field {field} unavailable: {}", error.message)}));
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
     for (index, block) in file.blocks().iter().enumerate() {
         let code = block.code.split(|&b| b == 0).next().unwrap_or(&[]);
         let code =
             std::str::from_utf8(code).map_err(|_| Error::new("encoding", "block code UTF-8"))?;
         *codes.entry(code.to_owned()).or_default() += 1;
-        if code == "OB" {
-            objects.push(id_name(file, index)?);
+        let names = match code {
+            "OB" => Some(&mut objects),
+            "MA" => Some(&mut materials),
+            "ME" => Some(&mut meshes),
+            "IM" => Some(&mut images),
+            "GR" => Some(&mut collections),
+            _ => None,
+        };
+        if let Some(names) = names
+            && let Some(name) = partial(id_name(file, index), &mut warnings, index, "id.name")?
+        {
+            names.push(name);
         }
         if code == "SC" {
-            let frame = match file.get(
+            let frame = match partial(
+                file.get(
+                    index,
+                    0,
+                    &[
+                        PathStep::Field(b"r".to_vec()),
+                        PathStep::Field(b"efra".to_vec()),
+                    ],
+                    true,
+                ),
+                &mut warnings,
                 index,
-                0,
-                &[
-                    PathStep::Field(b"r".to_vec()),
-                    PathStep::Field(b"efra".to_vec()),
-                ],
-                true,
+                "r.efra",
             )? {
-                Value::Signed(v) => v,
+                Some(Value::Signed(v)) => Some(v),
+                None => None,
                 _ => return Err(Error::new("type", "frame end not signed integer")),
             };
-            let camera = file
-                .get_pointer(index, 0, &[PathStep::Field(b"camera".to_vec())])?
-                .map(|target| id_name(file, target))
-                .transpose()?;
-            scenes.push(json!({"name":id_name(file, index)?, "frame_end":frame, "camera":camera}));
+            let camera = partial(
+                file.get_pointer(index, 0, &[PathStep::Field(b"camera".to_vec())])
+                    .and_then(|target| target.map(|target| id_name(file, target)).transpose()),
+                &mut warnings,
+                index,
+                "camera.id.name",
+            )?
+            .flatten();
+            let name = partial(id_name(file, index), &mut warnings, index, "id.name")?;
+            scenes.push(json!({"name":name, "frame_end":frame, "camera":camera}));
         }
     }
     let header = file.header();
     Ok(
         json!({"schema":1, "header":{"version":header.version, "pointer_size":header.pointer_size,
         "little_endian":header.little_endian, "file_format":header.file_format},
-        "block_codes":codes, "objects":objects, "scenes":scenes}),
+        "block_codes":codes, "objects":objects, "scenes":scenes, "materials":materials,
+        "meshes":meshes, "images":images, "collections":collections, "warnings":warnings}),
     )
 }
 fn signature(path: &std::path::Path) -> Result<Json> {
@@ -207,7 +250,7 @@ fn signature(path: &std::path::Path) -> Result<Json> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| Error::new("io", e.to_string()))?;
     Ok(
-        json!({"path_hex":hex(path.as_os_str().as_encoded_bytes()), "size_decimal":metadata.len().to_string(),
+        json!({"path_hex":hex(path.as_os_str().as_encoded_bytes()), "path":path.to_str(), "size_decimal":metadata.len().to_string(),
         "mtime_ns_decimal":modified.as_nanos().to_string()}),
     )
 }
@@ -223,6 +266,88 @@ fn run(args: &[OsString]) -> Result<()> {
         println!("{USAGE}");
         return Ok(());
     }
+    if args.len() == 3 && matches!(args[2].to_str(), Some("--help" | "-h")) {
+        let arguments = match command {
+            "summary" | "inspect" | "source-facts" | "library-facts" | "exr-header" => "FILE",
+            "get" => "FILE BLOCK PATH_JSON [ELEMENT] [--raw]",
+            "pointer" => "FILE BLOCK PATH_JSON [ELEMENT]",
+            "payload" => "FILE BLOCK",
+            "trace" => "FILE [--per-file|--recursive] [--strict|--non-strict] [--low-memory]",
+            "list" => "FILE [--json] [--sha256] [--timing] [--full-info] [--low-memory]",
+            "blocks" => "FILE [--limit N] [--address ADDRESS] [--dump]",
+            "overrides" => "FILE [--root-only|--recursive] [--strict|--non-strict] [--json]",
+            "pointer-census" => "FILE [--full]",
+            "diff" => "A.blend B.blend",
+            "edit" => {
+                "INPUT --output NEW --spec JSON --mode format-only|comp [--durability none|end|each-file]"
+            }
+            "rewrite" => "INPUT --output NEW --edits SPEC [--durability none|end|each-file]",
+            "pack" | "pack-sequence" => {
+                let inputs = if command == "pack" {
+                    "INPUT NEW_TARGET"
+                } else {
+                    "INPUT... -t NEW_TARGET"
+                };
+                println!(
+                    "oxblend {command} {inputs} [-p PROJECT] [--exclude GLOB...] [--noop|--dry-run|-n] [--relative-only] [--compress] [--keep-hierarchy] [--durability none|end|each-file]\nINPUT: read-only root blend(s). NEW_TARGET: fresh directory or .zip; never merged/overwritten.\n-t, --target NEW_TARGET: required for pack-sequence; pack requires positional target.\n-p, --project PROJECT: existing directory containing roots; defaults to input parent (common parent for sequence).\n-e, --exclude GLOB...: repeatable resolved-path exclusions, component-wise/right-anchored.\n--noop, --dry-run, -n: plan only; write nothing.\n-r, --relative-only: leave absolute references uncopied/unmodified.\n-c, --compress: seekable zstd blend output; incompatible with ZIP. Short -nrc switches can be combined.\n--keep-hierarchy: preserve hierarchy; default for pack-sequence.\n--durability none|end|each-file: no sync (default), filesystem syncfs, or per-file/parent fsync.\n-- ends option parsing. Missing members can publish available files but exit 2; inspect JSON and pack-info.txt.\n-h, --help: show this help."
+                );
+                return Ok(());
+            }
+            _ => return Err(Error::new("usage", USAGE)),
+        };
+        let details = match command {
+            "summary" => {
+                "FILE: read-only blend. Print header, block counts, Scene details and object/material/mesh/image/collection names. Missing fields become typed warnings/null; inspect warnings before judging an empty scene."
+            }
+            "inspect" => {
+                "FILE: read-only blend. Print every block in physical order and the complete source SDNA. Indices apply only to this exact file/save; byte names are hex."
+            }
+            "get" => {
+                "FILE: read-only blend. BLOCK: nonnegative physical block index from inspect. PATH_JSON: JSON array of field strings/flattened array indices. ELEMENT: nonnegative struct element, default 0. --raw: retain full char-array bytes instead of trimming at NUL. Print a typed value; byte values are hex. Pointer traversal is explicit via pointer."
+            }
+            "pointer" => {
+                "FILE: read-only blend. BLOCK: nonnegative physical block index from inspect. PATH_JSON: JSON array of field strings/flattened array indices. ELEMENT: nonnegative struct element, default 0. Print checked target block index or null; query that target explicitly."
+            }
+            "payload" => {
+                "FILE: read-only blend. BLOCK: nonnegative physical block index from inspect. Print its entire decoded payload as hex (potentially large)."
+            }
+            "source-facts" | "library-facts" => {
+                "FILE: read-only blend. Print narrow per-file collection/object closure (source-facts also follows current Scene and libraries). Unsupported linked layouts can refuse without a report; use trace for library questions and cross-file dependencies."
+            }
+            "trace" => {
+                "FILE: read-only root blend. --per-file: only this file; --recursive: follow libraries (default). --strict: refuse unsupported pointer interpretation (default); --non-strict: record supported partial traversal. --low-memory: use checked spill/seek reads, trading IO/temp disk for memory, not a memory ceiling. Print usages/errors/warnings; complete is traversal, not file availability. Inspect exists and missing_path_count too."
+            }
+            "list" => {
+                "FILE: read-only root blend. List existing expanded dependencies grouped by owner, text by default. --json: sorted JSON member sets. --full-info: include trace/usages. --sha256: hash members in text mode. --timing: timing diagnostics in text mode. SHA/timing with JSON warns and still emits JSON. --low-memory: trade IO/temp disk for lower memory. Missing dependencies refuse with exit 2 and no listing; use trace for details."
+            }
+            "blocks" => {
+                "FILE: read-only blend. Print block statistics/largest blocks/pointer referrers and fields. --limit N: default 10, supports negative slicing. --address ADDRESS: inspect referrers to decimal or 0x hexadecimal address. --dump: print payload bytes in 32-byte lines."
+            }
+            "overrides" => {
+                "FILE: read-only root blend. Print serialized override records/reference chains, not evaluated state. --root-only: only this file; --recursive: follow libraries (default). --strict: strict pointers (default); --non-strict: partial interpretation. --json: accepted; output is always JSON. Incomplete reports exit 2."
+            }
+            "pointer-census" => {
+                "FILE: read-only blend. Print whole-file pointer sites/states, diagnostic only (semantic_verified:false). --full: include every pointer-site detail rather than the summary."
+            }
+            "diff" => {
+                "A.blend B.blend: read-only inputs. Validate containers/layouts, then compare bytes or diagnostic allocation/content identities. Read equal/complete first: equal:null means inconclusive, even with difference_count:0. Returned comparison errors emit an incomplete v1 report and exit 2. Differences have unassessed impact, not render equivalence."
+            }
+            "edit" => {
+                "INPUT: read-only blend, little-endian header >=502. --output NEW: fresh no-replace output. --spec JSON: schema-2 file with expected-old fixed-width writes/bits. --mode format-only|comp: required; masked bits require format-only. --durability none|end|each-file: no sync (default), filesystem syncfs, or per-file/parent fsync. Not an unrestricted setter; inspect complete, errors, publication and durability in JSON."
+            }
+            "rewrite" => {
+                "INPUT: read-only blend. --output NEW: fresh no-replace output. --edits SPEC: schema-1 JSON file of explicit whitelisted filepath edits, with expected/replacement path hex and field_hex/index components. Replacement plus NUL must fit; no ID renames or pointer writes. --durability none|end|each-file: no sync (default), filesystem syncfs, or per-file/parent fsync. Inspect complete, errors, publication and durability; verify output bytes/field independently."
+            }
+            "exr-header" => {
+                "FILE: read-only OpenEXR. Print header/parts/channels and decoded attribute values or typed refusal/raw hex. No pixel decoding: header_complete does not imply pixel_integrity_verified (always false)."
+            }
+            _ => unreachable!(),
+        };
+        println!(
+            "oxblend {command} {arguments}\n{details}\n-h, --help: show this help.\nSee docs/USAGE.md for report contracts and specifications."
+        );
+        return Ok(());
+    }
     if command == "--version" || command == "-V" {
         println!("oxblend {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
@@ -231,10 +356,24 @@ fn run(args: &[OsString]) -> Result<()> {
         if args.len() != 4 {
             return Err(Error::new("usage", "diff A.blend B.blend"));
         }
-        let report = oxblend::diff::compare(
+        let report = match oxblend::diff::compare(
             std::path::Path::new(&args[2]),
             std::path::Path::new(&args[3]),
-        )?;
+        ) {
+            Ok(report) => report,
+            Err(error) => {
+                // Preserve the Rust API's returned-error contract, but give CLI
+                // consumers an honest verdict even before comparison can finish.
+                let report = json!({"schema":"oxblend.diff/v1", "read_only":true,
+                    "left":args[2].to_str(), "right":args[3].to_str(),
+                    "left_path_hex":hex(args[2].as_encoded_bytes()),
+                    "right_path_hex":hex(args[3].as_encoded_bytes()),
+                    "equal":null, "complete":false, "difference_count":0, "differences":[],
+                    "errors":[{"kind":error.kind,"message":error.message}]});
+                println!("{report}");
+                return Err(error);
+            }
+        };
         println!("{report}");
         if report["complete"] != true {
             return Err(Error::new(
@@ -542,10 +681,18 @@ fn run(args: &[OsString]) -> Result<()> {
         "summary" => summary(&file)?,
         "library-facts" | "source-facts" => {
             let facts = if command == "source-facts" {
-                oxblend::facts::source_facts(&file)?
+                oxblend::facts::source_facts(&file)
             } else {
-                oxblend::facts::library_facts(&file)?
-            };
+                oxblend::facts::library_facts(&file)
+            }
+            .map_err(|mut error| {
+                error.message = format!(
+                    "{command} in file '{}': {}; use trace for cross-file dependencies",
+                    std::path::Path::new(&args[2]).display(),
+                    error.message
+                );
+                error
+            })?;
             json!({"schema":1, "query":command, "semantic":if command == "source-facts" {"oxblend-source-1"} else {"oxblend-library-1"},
                 "reader":{"name":"oxblend", "version":env!("CARGO_PKG_VERSION"), "python_reference":"BAT-1.23"},
                 "input":input_signature, "stats":{"decompressed_bytes":file.decompressed_len(),

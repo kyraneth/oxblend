@@ -40,20 +40,34 @@ fn err(s: &str) -> Error {
     Error::new("exr_header", s)
 }
 fn i32le(b: &[u8]) -> Result<i32> {
-    Ok(i32::from_le_bytes(
-        b.try_into().map_err(|_| err("integer width"))?,
-    ))
+    Ok(i32::from_le_bytes(b.try_into().map_err(|_| {
+        err(&format!(
+            "expected a 4-byte integer, found {} bytes",
+            b.len()
+        ))
+    })?))
 }
 fn cstring<R: Read>(r: &mut R, max: usize) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     loop {
         let mut b = [0];
-        r.read_exact(&mut b).map_err(io)?;
+        r.read_exact(&mut b).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                err(&format!(
+                    "expected NUL-terminated name, found EOF after {} name bytes",
+                    out.len()
+                ))
+            } else {
+                io(e)
+            }
+        })?;
         if b[0] == 0 {
             return Ok(out);
         }
         if out.len() == max {
-            return Err(err("format name-length limit"));
+            return Err(err(&format!(
+                "expected name of at most {max} bytes, found additional non-NUL byte"
+            )));
         }
         out.push(b[0]);
     }
@@ -68,14 +82,29 @@ fn read_channels(value: &[u8], max: usize) -> Result<Vec<Channel>> {
             break;
         }
         if !names.insert(name.clone()) {
-            return Err(err("duplicate channel"));
+            return Err(err(&format!(
+                "expected unique channel names, found duplicate '{}'",
+                crate::value::display_bytes(&name)
+            )));
         }
         let mut record = [0; 16];
-        cursor.read_exact(&mut record).map_err(io)?;
+        let remaining = value.len() as u64 - cursor.position();
+        cursor.read_exact(&mut record).map_err(|_| {
+            err(&format!(
+                "channel '{}': expected 16 metadata bytes, found {remaining}",
+                crate::value::display_bytes(&name)
+            ))
+        })?;
         let pixel_type = i32le(&record[..4])?;
         let sampling = [i32le(&record[8..12])?, i32le(&record[12..])?];
         if !matches!(pixel_type, 0..=2) || record[4] > 1 || sampling.iter().any(|n| *n <= 0) {
-            return Err(err("invalid channel metadata"));
+            return Err(err(&format!(
+                "channel '{}': expected pixel type 0..2, linear 0..1 and positive sampling; found type {pixel_type}, linear {}, sampling {}x{}",
+                crate::value::display_bytes(&name),
+                record[4],
+                sampling[0],
+                sampling[1]
+            )));
         }
         channels.push(Channel {
             name,
@@ -86,7 +115,11 @@ fn read_channels(value: &[u8], max: usize) -> Result<Vec<Channel>> {
         });
     }
     if cursor.position() != value.len() as u64 {
-        return Err(err("trailing chlist bytes"));
+        return Err(err(&format!(
+            "expected chlist to end after its NUL terminator at byte {}, found {} trailing bytes",
+            cursor.position(),
+            value.len() as u64 - cursor.position()
+        )));
     }
     Ok(channels)
 }
@@ -94,14 +127,28 @@ pub fn read(path: &Path) -> Result<ExrHeader> {
     let mut f = File::open(path).map_err(io)?;
     let before = f.metadata().map_err(io)?;
     let length = before.len();
+    if length < 8 {
+        return Err(err(&format!(
+            "expected 8-byte EXR prefix, found {length} bytes"
+        )));
+    }
     let mut prefix = [0; 8];
     f.read_exact(&mut prefix).map_err(io)?;
     if prefix[..4] != [0x76, 0x2f, 0x31, 0x01] {
-        return Err(err("magic"));
+        return Err(err(&format!(
+            "expected OpenEXR magic 20000630 (bytes 762f3101), found {} (bytes {})",
+            u32::from_le_bytes(prefix[..4].try_into().unwrap()),
+            crate::value::hex(&prefix[..4])
+        )));
     }
     let version = u32::from_le_bytes(prefix[4..].try_into().unwrap());
     if version & 0xff != 2 || version & !0x1e02 != 0 {
-        return Err(Error::new("exr_unsupported", "unknown version/flags"));
+        return Err(Error::new(
+            "exr_unsupported",
+            format!(
+                "expected EXR version 2 with supported flags 0x1e00, found version/flags 0x{version:08x}"
+            ),
+        ));
     }
     let multipart = version & 0x1000 != 0;
     let max = if version & 0x400 != 0 { 255 } else { 31 };
@@ -119,24 +166,37 @@ pub fn read(path: &Path) -> Result<ExrHeader> {
                 break;
             }
             if !names.insert(name.clone()) {
-                return Err(err("duplicate attribute"));
+                return Err(err(&format!(
+                    "expected unique attribute names, found duplicate '{}'",
+                    crate::value::display_bytes(&name)
+                )));
             }
             let kind = cstring(&mut f, max)?;
             if kind.is_empty() {
-                return Err(err("empty attribute type"));
+                return Err(err(&format!(
+                    "attribute '{}': expected nonempty type, found empty string",
+                    crate::value::display_bytes(&name)
+                )));
             }
             let mut n = [0; 4];
             f.read_exact(&mut n).map_err(io)?;
             let n = i32le(&n)?;
             if n < 0 {
-                return Err(err("negative attribute size"));
+                return Err(err(&format!(
+                    "attribute '{}': expected nonnegative size, found {n}",
+                    crate::value::display_bytes(&name)
+                )));
             }
             let offset = f.stream_position().map_err(io)?;
             let end = offset
                 .checked_add(n as u64)
-                .ok_or_else(|| err("attribute overflow"))?;
+                .ok_or_else(|| err(&format!("expected representable attribute end, found offset {offset} + size {n} overflow")))?;
             if end > length {
-                return Err(err("attribute beyond file"));
+                return Err(err(&format!(
+                    "attribute '{}': expected {n} bytes at offset {offset}, found only {} bytes before EOF",
+                    crate::value::display_bytes(&name),
+                    length.saturating_sub(offset)
+                )));
             }
             // Retain exactly this payload, including application metadata. No
             // decoder can read into the following attribute or pixel chunks.
@@ -144,7 +204,10 @@ pub fn read(path: &Path) -> Result<ExrHeader> {
             f.read_exact(&mut value).map_err(io)?;
             if name == b"channels" {
                 if kind != b"chlist" {
-                    return Err(err("channels must be chlist"));
+                    return Err(err(&format!(
+                        "attribute channels: expected type chlist, found '{}'",
+                        crate::value::display_bytes(&kind)
+                    )));
                 }
                 part.channels = read_channels(&value, max)?;
             }
@@ -160,7 +223,7 @@ pub fn read(path: &Path) -> Result<ExrHeader> {
             if multipart && !parts.is_empty() {
                 break;
             }
-            return Err(err("empty header"));
+            return Err(err("expected a nonempty EXR header, found no attributes"));
         }
         for (n, k, size) in [
             ("channels", "chlist", None),
@@ -176,9 +239,18 @@ pub fn read(path: &Path) -> Result<ExrHeader> {
                 .attributes
                 .iter()
                 .find(|a| a.name == n.as_bytes())
-                .ok_or_else(|| err("missing required attribute"))?;
+                .ok_or_else(|| {
+                    err(&format!(
+                        "expected required attribute '{n}' of type {k}, found none"
+                    ))
+                })?;
             if a.kind != k.as_bytes() || size.is_some_and(|s| a.length != s) {
-                return Err(err("required attribute type/size mismatch"));
+                let expected_size = size.map_or_else(|| "variable".to_owned(), |s| s.to_string());
+                return Err(err(&format!(
+                    "attribute '{n}': expected type {k}, size {expected_size}; found type '{}', size {}",
+                    crate::value::display_bytes(&a.kind),
+                    a.length
+                )));
             }
         }
         parts.push(part);

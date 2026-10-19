@@ -97,7 +97,9 @@ impl PackReport {
             .iter()
             .filter(|v| v["kind"] == "missing_library")
             .count();
-        json!({"schema":1,"operation":"pack","input_path_hex":raw_hex(&self.input),"legacy_input_trace_scope":"first-root-only","input_paths_hex":self.inputs.iter().map(|p|raw_hex(p)).collect::<Vec<_>>(),"root_traces":self.inputs.iter().zip(&self.root_traces).map(|(p,t)|json!({"input_path_hex":raw_hex(p),"trace":t.json()})).collect::<Vec<_>>(),"keep_hierarchy":self.keep_hierarchy,"directory_path_hex":raw_hex(&self.directory),"planning_complete":self.planning_complete,"directory_created":self.directory_created,"noop":self.noop,"compression_requested":self.compressed,"archive":self.archive,"archive_written":self.archive_written,"archive_entry_paths_not_filesystem_paths":self.archive,"complete":self.complete,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"trace":self.trace.json(),"files":self.files.iter().map(|f|json!({"input_path_hex":raw_hex(&f.input),"output_path_hex":raw_hex(&f.output),"output_written":f.output_written,"durability_completed":f.durability_completed,"rewritten":f.rewritten})).collect::<Vec<_>>(),"rewrites":self.rewrites.iter().map(EditReport::json).collect::<Vec<_>>(),"missing_links":links,"missing_link_counts":{"missing_id":missing_ids,"missing_library":missing_libraries},"missing":self.missing.iter().map(|u| { let mut v=u.json(); v["absolute_path_hex"]=json!(raw_hex(&crate::trace::resolve(&bytes_path(&u.owner_file), &u.asset_path))); v }).collect::<Vec<_>>(),"warnings":self.unrelocated_unselected_paths.iter().map(|u| { let r=u.path_full_field.as_ref().or(u.path_dir_field.as_ref()).expect("unrelocated path has field provenance"); json!({"kind":"unrelocated_unselected_path","owner_file_hex":hex(&u.owner_file),"owner_file":std::str::from_utf8(&u.owner_file).ok(),"block_address":u.block_address.to_string(),"id_name_hex":hex(&u.block_name),"id_name":std::str::from_utf8(&u.block_name).ok(),"field_path_hex":r.path.iter().map(|p|hex(p)).collect::<Vec<_>>(),"field_path":r.path.iter().map(|p|std::str::from_utf8(p).ok()).collect::<Option<Vec<_>>>(),"asset_path_hex":hex(&u.asset_path),"asset_path":std::str::from_utf8(&u.asset_path).ok()}) }).collect::<Vec<_>>(),"pack_info":self.info_path.as_ref().map(|p|json!({"output_path_hex":raw_hex(p),"output_written":self.info_written,"durability_completed":self.info_durability_completed})),"errors":self.errors.iter().map(|e|json!({"kind":e.kind,"message":e.message})).collect::<Vec<_>>()})
+        crate::value::with_text(
+            json!({"schema":1,"operation":"pack","input_path_hex":raw_hex(&self.input),"legacy_input_trace_scope":"first-root-only","input_paths_hex":self.inputs.iter().map(|p|raw_hex(p)).collect::<Vec<_>>(),"root_traces":self.inputs.iter().zip(&self.root_traces).map(|(p,t)|json!({"input_path_hex":raw_hex(p),"trace":t.json()})).collect::<Vec<_>>(),"keep_hierarchy":self.keep_hierarchy,"directory_path_hex":raw_hex(&self.directory),"planning_complete":self.planning_complete,"directory_created":self.directory_created,"noop":self.noop,"compression_requested":self.compressed,"archive":self.archive,"archive_written":self.archive_written,"archive_entry_paths_not_filesystem_paths":self.archive,"complete":self.complete,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"trace":self.trace.json(),"files":self.files.iter().map(|f|json!({"input_path_hex":raw_hex(&f.input),"output_path_hex":raw_hex(&f.output),"output_written":f.output_written,"durability_completed":f.durability_completed,"rewritten":f.rewritten})).collect::<Vec<_>>(),"rewrites":self.rewrites.iter().map(EditReport::json).collect::<Vec<_>>(),"missing_links":links,"missing_link_counts":{"missing_id":missing_ids,"missing_library":missing_libraries},"missing":self.missing.iter().map(|u| { let mut v=u.json(); v["absolute_path_hex"]=json!(raw_hex(&crate::trace::resolve(&bytes_path(&u.owner_file), &u.asset_path))); v }).collect::<Vec<_>>(),"warnings":self.unrelocated_unselected_paths.iter().map(|u| { let r=u.path_full_field.as_ref().or(u.path_dir_field.as_ref()).expect("unrelocated path has field provenance"); json!({"kind":"unrelocated_unselected_path","owner_file_hex":hex(&u.owner_file),"owner_file":std::str::from_utf8(&u.owner_file).ok(),"block_address":u.block_address.to_string(),"id_name_hex":hex(&u.block_name),"id_name":std::str::from_utf8(&u.block_name).ok(),"field_path_hex":r.path.iter().map(|p|hex(p)).collect::<Vec<_>>(),"field_path":r.path.iter().map(|p|std::str::from_utf8(p).ok()).collect::<Option<Vec<_>>>(),"asset_path_hex":hex(&u.asset_path),"asset_path":std::str::from_utf8(&u.asset_path).ok()}) }).collect::<Vec<_>>(),"pack_info":self.info_path.as_ref().map(|p|json!({"output_path_hex":raw_hex(p),"output_written":self.info_written,"durability_completed":self.info_durability_completed})),"errors":self.errors.iter().map(|e|json!({"kind":e.kind,"message":e.message})).collect::<Vec<_>>()}),
+        )
     }
 }
 fn phase(name: &str, started: crate::phase::Start) {
@@ -308,7 +310,7 @@ fn asset_metadata(path: &Path) -> Result<Metadata> {
         if e.kind() == std::io::ErrorKind::NotFound {
             Error::new(
                 "missing_asset",
-                format!("required asset missing: {}", raw_hex(path)),
+                format!("required asset missing: '{}'", path.display()),
             )
         } else {
             io(e)
@@ -400,7 +402,7 @@ fn wildcard_members(path: &Path) -> Result<Vec<PathBuf>> {
     if files.is_empty() {
         return Err(Error::new(
             "missing_asset",
-            format!("required asset missing: {}", raw_hex(path)),
+            format!("required asset missing: '{}'", path.display()),
         ));
     }
     Ok(files.into_iter().collect())
@@ -465,7 +467,7 @@ pub(crate) fn expand(path: &Path, sequence: bool) -> Result<Vec<PathBuf>> {
         if files.is_empty() {
             return Err(Error::new(
                 "missing_asset",
-                format!("required asset missing: {}", raw_hex(path)),
+                format!("required asset missing: '{}'", path.display()),
             ));
         }
         return Ok(files);
@@ -478,7 +480,7 @@ pub(crate) fn expand(path: &Path, sequence: bool) -> Result<Vec<PathBuf>> {
     if filename.is_empty() {
         return Err(Error::new(
             "missing_asset",
-            format!("required asset missing: {}", raw_hex(path)),
+            format!("required asset missing: '{}'", path.display()),
         ));
     }
     if let Some((prefix, suffix)) = udim_pattern(&filename) {
@@ -687,20 +689,28 @@ fn overview(
             text.push(b'\n');
         }
         text.extend(format!("Total unique assets: {unique_assets}\n").as_bytes());
-        // The multi-root overview counts distinct missing physical declarations,
-        // not reference-site rows. Single-root overviews have no missing footer.
-        // Independently observed for duplicate roots/shared assets and ZIP too.
-        let missing = report
-            .missing
-            .iter()
-            .map(|usage| crate::trace::resolve(&bytes_path(&usage.owner_file), &usage.asset_path))
-            .collect::<BTreeSet<_>>()
-            .len();
-        if missing != 0 {
-            text.extend(format!("Missing files: {missing}\n").as_bytes());
+    }
+    let missing = report
+        .missing
+        .iter()
+        .map(|usage| crate::trace::resolve(&bytes_path(&usage.owner_file), &usage.asset_path))
+        .collect::<BTreeSet<_>>();
+    let links = report.missing_links();
+    // Publication is not finished yet, so report.complete is not authoritative
+    // here. These are the known closure failures at overview planning time.
+    if !missing.is_empty() || !links.is_empty() || !report.errors.is_empty() {
+        text.extend(b"INCOMPLETE: do not use this pack as a complete project.\n");
+    }
+    if !missing.is_empty() {
+        text.extend(format!("Missing files: {}\n", missing.len()).as_bytes());
+        for path in missing {
+            let shown = path
+                .to_str()
+                .map(|s| format!("{s:?}"))
+                .unwrap_or_else(|| format!("hex:{}", raw_hex(&path)));
+            text.extend(format!("Missing file: {shown}\n").as_bytes());
         }
     }
-    let links = report.missing_links();
     let ids = links.iter().filter(|v| v["kind"] == "missing_id").count();
     let libraries = links
         .iter()
@@ -1116,7 +1126,7 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
             if let Some(e) = errors.first() {
                 return Err(Error::new(
                     e.kind,
-                    format!("{}: {}", raw_hex(owner), e.message),
+                    format!("{}: {}", owner.display(), e.message),
                 ));
             }
             files
@@ -1193,9 +1203,9 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
                 },
                 format!(
                     "missing path {} referenced by block {} in {}",
-                    raw_hex(&path),
+                    path.display(),
                     usage.block_address,
-                    crate::value::hex(&usage.owner_file)
+                    crate::value::display_bytes(&usage.owner_file)
                 ),
             ));
         }

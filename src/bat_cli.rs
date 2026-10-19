@@ -261,9 +261,8 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
         },
     )?;
     for e in &report.errors {
-        // 1.0 retains list's historical missing-library tolerance, but an
-        // absent requested ID refuses; trace/pack expose its typed details.
-        // A unified partial-list completeness protocol is deferred.
+        // Missing physical declarations are checked below, before any listing.
+        // An incomplete serialized trace still refuses; trace exposes details.
         if !matches!(e.kind, FailureKind::MissingLibrary) {
             return Err(Error::new(
                 "incomplete_trace",
@@ -287,10 +286,20 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
             directory_listing(&resource, &mut members)?;
             members
         } else {
-            // Listing describes present members, not unresolved declarations.
-            // Empty/missing literal, glob, UDIM and sequence expansions add
-            // no dependency path; the usage remains available to --full-info.
-            crate::pack::expand(&resource, u.is_sequence).unwrap_or_default()
+            // Preserve the existing listing shape, but never omit missing
+            // declarations as though the dependency inventory were complete.
+            crate::pack::expand(&resource, u.is_sequence).map_err(|mut error| {
+                if error.kind == "missing_asset" && u.block_code == b"LI" {
+                    error.kind = "missing_library";
+                }
+                error.message = format!(
+                    "{}; referenced by block {} in '{}'; use trace for per-usage availability",
+                    error.message,
+                    u.block_address,
+                    crate::value::display_bytes(&u.owner_file)
+                );
+                error
+            })?
         };
         text_members
             .entry(owner.clone())
@@ -386,9 +395,9 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
             for u in &report.usages {
                 println!(
                     "    usage {} at {:#x}: {}",
-                    crate::value::hex(&u.owner_file),
+                    crate::value::display_bytes(&u.owner_file),
                     u.block_address,
-                    crate::value::hex(&u.asset_path)
+                    crate::value::display_bytes(&u.asset_path)
                 );
             }
         }

@@ -1,4 +1,4 @@
-//! Hand-authored EXR header bytes, no studio images, pixels or library writer.
+//! Hand-authored EXR header bytes, no external images, pixels or library writer.
 use std::{
     path::PathBuf,
     process::Command,
@@ -184,5 +184,31 @@ fn truncated_or_oversized_declared_attributes_are_header_structure_errors() {
         let (r, j) = cli(&w, b);
         assert_eq!(r.status.code(), Some(2), "{j}");
         assert_eq!(j["error"]["kind"], "exr_header");
+        let message = j["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains("broken") && message.contains("expected") && message.contains("found"),
+            "{message}"
+        );
     }
+}
+#[test]
+fn wrong_magic_and_channel_extent_errors_explain_expected_and_found() {
+    let w = Work::new();
+    let (out, j) = cli(&w, b"BLENDER-v405".to_vec());
+    assert_eq!(out.status.code(), Some(2));
+    let message = j["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("expected OpenEXR magic 20000630") && message.contains("found"),
+        "{message}"
+    );
+    let mut b = 20000630u32.to_le_bytes().to_vec();
+    b.extend(2u32.to_le_bytes());
+    attr(&mut b, "channels", "chlist", b"R\0\0\0");
+    let (out, j) = cli(&w, b);
+    assert_eq!(out.status.code(), Some(2));
+    let message = j["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("channel 'R'") && message.contains("expected 16 metadata bytes, found 2"),
+        "{message}"
+    );
 }

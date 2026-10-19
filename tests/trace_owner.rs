@@ -106,6 +106,14 @@ fn pack_uses_owner_scoped_field_origins_and_distinct_rewrites() {
         2,
         "{report}"
     );
+    assert_eq!(report["input_path"], input.to_str().unwrap());
+    assert_eq!(report["input_paths"], serde_json::json!([input]));
+    assert_eq!(report["directory_path"], output.to_str().unwrap());
+    for edit in report["rewrites"][0]["edits"].as_array().unwrap() {
+        assert!(edit["before_path"].as_str().unwrap().ends_with(".pc2"));
+        assert!(edit["after_path"].as_str().unwrap().ends_with(".pc2"));
+        assert_eq!(edit["steps"][0]["field"], "filepath");
+    }
     assert_eq!(std::fs::read(&input).unwrap(), body);
     let packed = output.join("shot/cross-id.blend");
     let t = trace(&packed, options()).unwrap();

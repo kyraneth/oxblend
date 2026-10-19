@@ -436,7 +436,13 @@ impl<'a> Inventory<'a> {
             Err(e) => {
                 return Err(Error::new(
                     e.kind,
-                    format!("{} {} {:?}: {}", b, self.ty(b), path, e.message),
+                    format!(
+                        "block {} {}, field {}: {}",
+                        b,
+                        self.ty(b),
+                        path.join("."),
+                        e.message
+                    ),
                 ));
             }
         };
@@ -654,6 +660,16 @@ fn primitive(ty: &[u8], bytes: &[u8], little: bool) -> Json {
 pub fn compare(a: &Path, b: &Path) -> Result<Json> {
     let left = BlendFile::open(a)?;
     let right = BlendFile::open(b)?;
+    let mut report = json!({"schema":"oxblend.diff/v1","read_only":true,"left":a,"right":b,"matching":"ID type+name+library; nodes tree/name/type; sockets node/direction/identifier; links semantic endpoints; other allocations persistent owning field/list","matched_allocations":0,"node_identifier_bijection":[],"differences":[],"difference_count":0,"complete":true,"unresolved":{"left":[],"right":[]},"explicit_ignored_fields":{"left":[],"right":[]},"equal":true,"opaque_contract":"all anchored opaque allocations compared as bytes, no pointer/semantic interpretation","native_contract":"AMBER-3 requires actual saved FileGlobal hash68609be8e23b/version503.25; these are compared fields, never inferred from filenames"});
+    // Physical equality proves equality even when semantic identities cannot be
+    // reconstructed. Parse both inputs first: this is not a malformed-file bypass.
+    if byte_equal(a, b)? {
+        report["matching"] =
+            json!("physical byte equality; no semantic identity reconstruction needed");
+        report["matched_allocations"] =
+            json!(left.blocks().iter().filter(|b| b.code != *b"DNA1").count());
+        return Ok(report);
+    }
     let mut l = Inventory::new(&left)?;
     let mut r = Inventory::new(&right)?;
     let keys = l
@@ -709,7 +725,36 @@ pub fn compare(a: &Path, b: &Path) -> Result<Json> {
             ));
         }
     }
-    Ok(
-        json!({"schema":"oxblend.diff/v1","read_only":true,"left":a,"right":b,"matching":"ID type+name+library; nodes tree/name/type; sockets node/direction/identifier; links semantic endpoints; other allocations persistent owning field/list","matched_allocations":matched,"node_identifier_bijection":nodes,"differences":differences,"complete":l.unresolved.is_empty()&&r.unresolved.is_empty(),"unresolved":{"left":l.unresolved,"right":r.unresolved},"explicit_ignored_fields":{"left":l.excluded,"right":r.excluded},"equal":if l.unresolved.is_empty()&&r.unresolved.is_empty(){Some(differences.is_empty())}else{None},"opaque_contract":"all anchored opaque allocations compared as bytes, no pointer/semantic interpretation","native_contract":"AMBER-3 requires actual saved FileGlobal hash68609be8e23b/version503.25; these are compared fields, never inferred from filenames"}),
-    )
+    let complete = l.unresolved.is_empty() && r.unresolved.is_empty();
+    report["matched_allocations"] = json!(matched);
+    report["node_identifier_bijection"] = json!(nodes);
+    report["difference_count"] = json!(differences.len());
+    report["equal"] = json!(if complete {
+        Some(differences.is_empty())
+    } else {
+        None
+    });
+    report["differences"] = json!(differences);
+    report["complete"] = json!(complete);
+    report["unresolved"] = json!({"left":l.unresolved,"right":r.unresolved});
+    report["explicit_ignored_fields"] = json!({"left":l.excluded,"right":r.excluded});
+    Ok(report)
+}
+fn byte_equal(a: &Path, b: &Path) -> Result<bool> {
+    use std::io::{BufRead, BufReader};
+    let mut a = BufReader::new(std::fs::File::open(a).map_err(crate::edit_output::io)?);
+    let mut b = BufReader::new(std::fs::File::open(b).map_err(crate::edit_output::io)?);
+    loop {
+        let left = a.fill_buf().map_err(crate::edit_output::io)?;
+        let right = b.fill_buf().map_err(crate::edit_output::io)?;
+        if left.is_empty() || right.is_empty() {
+            return Ok(left.is_empty() && right.is_empty());
+        }
+        let n = left.len().min(right.len());
+        if left[..n] != right[..n] {
+            return Ok(false);
+        }
+        a.consume(n);
+        b.consume(n);
+    }
 }

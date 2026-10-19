@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo/oxblend-logo.svg" width="160" alt="Oxblend logo"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/kyraneth/oxblend/main/assets/logo/oxblend-logo.svg" width="160" alt="Oxblend logo"></p>
 
 # Oxblend
 
@@ -6,7 +6,7 @@ Read, trace, pack and safely edit Blender `.blend` files without Blender.
 
 A fast Rust library and command-line tool. It tells you what a `.blend` file contains and what it depends on, packs it with its dependencies, and makes guarded edits, all without opening Blender. When it can't be sure, it refuses and says why instead of guessing.
 
-Linux x86_64 · version 1.0.0
+Linux x86_64 · version 1.1.0
 
 ## Install (Linux x86_64)
 

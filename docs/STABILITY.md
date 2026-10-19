@@ -25,6 +25,7 @@ behind another occurrence of the same schema value.
 | `src/pack.rs` | `1` | `1` | pack, pack-sequence; nested trace/rewrite reports retain their own schemas |
 | `src/typed_edit.rs` | `2` | `1` | edit (format-only and comp) |
 | `src/diff.rs` | `"oxblend.diff/v1"` | `1` | diff |
+| `src/main.rs` | `"oxblend.diff/v1"` | `1` | diff returned-error stdout |
 | `src/file_ops.rs` | `"oxblend.pointer-census/v2"` | `1` | pointer-census |
 <!-- /schemas -->
 
@@ -177,8 +178,22 @@ not a claim that a path changed. Failed validation is not a no-op success.
 
 Read `edits`, `write_length`, `container_reencoded`, `output_decoder_verified`,
 `output_written`, `durability_completed`, `errors` and `complete` separately.
-The unchanged-copy path does not claim a fresh full output decoder pass
-(`output_decoder_verified:false`). A pack's explicit compression request may
+Unchanged copies and successful changed raw-file edits do not claim a fresh
+full output decoder pass (`output_decoder_verified:false`). Changed compressed
+outputs are decoder-verified before publication and report true. False is a
+verification limit, not a failed publication or an automatic incompleteness signal. Independently
+query the new field and verify decoded bytes; native Blender validation is separate.
+For raw inputs, compare equal-length files and permit differences only inside the
+reported decoded `offset..offset+write_length` ranges. For compressed inputs, use
+`inspect` on input and output to verify identical headers, SDNA and ordered block
+metadata (`data_offset`, `size`, code, address, SDNA index, count). For every block,
+run `payload FILE BLOCK` on each file and hex-decode `value.hex`. Require equal
+payload lengths. At payload byte index i, the decoded-file offset is
+`blocks[BLOCK].data_offset + i`; require equal bytes unless that offset lies in a
+reported write range. Verify each replacement independently with `get`. This
+compares complete decoded block payloads, not physical compressed offsets or
+container bytes; it is not an independent full-container decoder certificate.
+A pack's explicit compression request may
 re-encode even without path changes. Neither an empty edit list nor successful
 publication implies Blender evaluation or native semantic verification.
 
@@ -219,8 +234,12 @@ tracing. Like `missing_library`, it forces incomplete/EXIT 2 but permits a pack 
 publish its existing members. Corrupt present IDs still refuse all publication.
 Trace JSON includes `missing_link_counts`; pack JSON also has aggregate
 `missing_links`, and pack-info lists both classes with nonzero counts/details.
-The `pack-info.txt` missing-link footer follows the ordinary opening/missing-file
-text. It emits `Missing libraries: N\n` when that count is nonzero, then
+Both single- and multi-root `pack-info.txt` mark known missing-file/linked-ID
+packs `INCOMPLETE`. Nonzero distinct missing physical paths produce
+`Missing files: N\n`, followed by `Missing file: PATH\n` for each sorted path.
+PATH is quoted/escaped decoded UTF-8 or `hex:...` for non-UTF-8 native bytes;
+JSON keeps its existing missing usage records. The missing-link footer follows
+this opening/missing-file text. It emits `Missing libraries: N\n` when that count is nonzero, then
 `Missing linked IDs: N\n` when that count is nonzero. It then emits one
 `KIND: RECORD\n` line per `missing_links` record, in report order, where KIND is
 `missing_library` or `missing_id` and RECORD is compact UTF-8 JSON with sorted
@@ -242,8 +261,17 @@ their dependencies is conservative collection, not an evaluation of the scene.
 
 Missing-link counts describe referencing sites/chains, not unique absent IDs.
 `list` retains its conservative EXIT 2/no-listing policy for `missing_id`;
-`trace`/`pack` expose typed details. Missing library files retain their historical
-list tolerance. A unified list-completeness policy is deferred.
+`trace`/`pack` expose typed details. Missing physical assets and libraries now also refuse `list` with EXIT 2 and a typed stderr error before any listing. This corrects misleading success, without changing the existing JSON dependency-map or full-info shape. Trace remains the detailed inventory; no partial-list protocol is introduced.
+
+## Additive usability fields
+
+Summary adds `materials`, `meshes`, `images`, `collections` and typed `warnings` arrays. Names retain their saved ID prefixes, as existing Object names do. Missing summary fields are warning-only; unavailable Scene fields are null, and other failure kinds still refuse.
+
+Trace usages add `resolved_path_hex`, UTF-8-or-null `resolved_path`, and `exists`. The top-level `missing_path_count` counts absent usage sites, not distinct files; `referenced_paths_exist` is true when that count is zero. These are disk observations at JSON serialization time, not an atomic filesystem snapshot: sequence/glob/UDIM existence means a nonempty expansion, not every possible member. Directories count as present. `complete` retains its traversal meaning and does not promise disk availability. Nested trace reports and list full-info usages expose the same fields.
+
+Trace/list full-info/pack/edit/rewrite add UTF-8-or-null aliases beside authoritative hex path/name/field/type fields, recursively. Component/path arrays are null if any component is invalid UTF-8. Existing aliases retain their meanings. Binary payload/bit fields remain hex. Ordinary list JSON retains its native-byte map encoding.
+
+Diff adds `difference_count`, equal to the number of reported differences (not proof that unresolved content is equal). CLI returned comparison/read errors also emit the existing `oxblend.diff/v1` schema (not numeric schema 1) with `equal:null`, `complete:false`, typed `errors`, and empty differences/count 0 because no comparison completed. The original typed stderr error and exit 2 are retained. Argument-count/usage refusals remain stderr-only; Rust `diff::compare` still returns `Err` on those underlying failures. After input container/layout validation, physical byte equality bypasses semantic matching and proves `equal:true` even for opaque/unanchored allocations. `matching` identifies that basis; no Blender evaluation is implied.
 
 ## EXR attribute values
 

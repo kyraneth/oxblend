@@ -1726,7 +1726,7 @@ impl Context<'_> {
                         }),
                         message: format!(
                             "selected linked ID absent from source library: {}",
-                            hex(name)
+                            crate::value::display_bytes(name)
                         ),
                     };
                     self.capture(failure);
@@ -2776,15 +2776,26 @@ mod serialized_vectors {
 }
 impl FieldReference {
     pub fn json(&self) -> Json {
-        json!({"name_hex":hex(&self.name),"full_name_hex":hex(&self.full_name),"offset":self.offset,"size":self.size,"type_hex":hex(&self.dna_type),"pointer":self.pointer})
+        crate::value::with_text(
+            json!({"name_hex":hex(&self.name),"full_name_hex":hex(&self.full_name),"offset":self.offset,"size":self.size,"type_hex":hex(&self.dna_type),"pointer":self.pointer}),
+        )
     }
     pub fn provenance_json(&self) -> Json {
-        json!({"owner_file_hex":hex(&self.owner_file),"block_address":self.block_address.to_string(),"element":self.element,"field_path_hex":self.path.iter().map(|p|hex(p)).collect::<Vec<_>>()})
+        crate::value::with_text(
+            json!({"owner_file_hex":hex(&self.owner_file),"block_address":self.block_address.to_string(),"element":self.element,"field_path_hex":self.path.iter().map(|p|hex(p)).collect::<Vec<_>>()}),
+        )
     }
 }
 impl Usage {
     pub fn json(&self) -> Json {
-        json!({"owner_file":std::str::from_utf8(&self.owner_file).ok(),"owner_file_hex":hex(&self.owner_file),"library_chain_hex":self.library_chain.iter().map(|p|hex(p)).collect::<Vec<_>>(),"block_code_hex":hex(&self.block_code),"block_address":self.block_address.to_string(),"block_offset":self.block_offset,"block_type":std::str::from_utf8(&self.block_type).ok(),"block_name_hex":hex(&self.block_name),"asset_path_hex":hex(&self.asset_path),"is_sequence":self.is_sequence,"is_udim":self.is_udim,"optional":self.optional,"path_full_field":self.path_full_field.as_ref().map(FieldReference::json),"path_dir_field":self.path_dir_field.as_ref().map(FieldReference::json),"path_base_field":self.path_base_field.as_ref().map(FieldReference::json),"field_provenance":{"full":self.path_full_field.as_ref().map(FieldReference::provenance_json),"dir":self.path_dir_field.as_ref().map(FieldReference::provenance_json),"base":self.path_base_field.as_ref().map(FieldReference::provenance_json)}})
+        let resolved = resolve(&path(&self.owner_file), &self.asset_path);
+        let exists = resolved.is_dir()
+            || crate::pack::expand(&resolved, self.is_sequence)
+                .is_ok_and(|members| !members.is_empty());
+        let mut value = json!({"owner_file":std::str::from_utf8(&self.owner_file).ok(),"owner_file_hex":hex(&self.owner_file),"library_chain_hex":self.library_chain.iter().map(|p|hex(p)).collect::<Vec<_>>(),"block_code_hex":hex(&self.block_code),"block_address":self.block_address.to_string(),"block_offset":self.block_offset,"block_type":std::str::from_utf8(&self.block_type).ok(),"block_name_hex":hex(&self.block_name),"asset_path_hex":hex(&self.asset_path),"is_sequence":self.is_sequence,"is_udim":self.is_udim,"optional":self.optional,"path_full_field":self.path_full_field.as_ref().map(FieldReference::json),"path_dir_field":self.path_dir_field.as_ref().map(FieldReference::json),"path_base_field":self.path_base_field.as_ref().map(FieldReference::json),"field_provenance":{"full":self.path_full_field.as_ref().map(FieldReference::provenance_json),"dir":self.path_dir_field.as_ref().map(FieldReference::provenance_json),"base":self.path_base_field.as_ref().map(FieldReference::provenance_json)}});
+        value["resolved_path_hex"] = json!(hex(resolved.as_os_str().as_encoded_bytes()));
+        value["exists"] = json!(exists);
+        crate::value::with_text(value)
     }
 }
 impl TraceFailure {
@@ -2820,13 +2831,22 @@ impl TraceFailure {
                     .collect::<Option<Vec<_>>>()
             );
         }
-        value
+        crate::value::with_text(value)
     }
 }
 impl TraceReport {
     pub fn json(&self) -> Json {
         let mut value = json!({"schema":1,"complete":self.complete,"usages":self.usages.iter().map(Usage::json).collect::<Vec<_>>(),"errors":self.errors.iter().map(TraceFailure::json).collect::<Vec<_>>(),"warnings":self.warnings.iter().map(|w|match w{TraceWarning::MissingLibrary{owner_file,library_path}=>json!({"kind":"missing_library","owner_file_hex":hex(owner_file),"library_path_hex":hex(library_path)}),TraceWarning::SilencedPointer{failure}=>json!({"kind":"silenced_pointer","failure":failure.json()}),TraceWarning::UnknownAssetCode{owner_file,code}=>json!({"kind":"unknown_asset_code","owner_file_hex":hex(owner_file),"code_hex":hex(code)})}).collect::<Vec<_>>()});
         value["missing_link_counts"] = json!({"missing_id":self.errors.iter().filter(|e|matches!(e.kind, FailureKind::MissingId)).count(),"missing_library":self.errors.iter().filter(|e|matches!(e.kind, FailureKind::MissingLibrary)).count()});
-        value
+        value["missing_path_count"] = json!(
+            value["usages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|u| u["exists"] == false)
+                .count()
+        );
+        value["referenced_paths_exist"] = json!(value["missing_path_count"] == 0);
+        crate::value::with_text(value)
     }
 }

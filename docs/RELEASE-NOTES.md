@@ -1,3 +1,17 @@
+# Oxblend 1.1.0
+
+- Partial summaries with typed missing-field warnings and material/mesh/image/collection names.
+- Missing dependencies no longer silently succeed in `list`; trace separates traversal completeness from disk availability.
+- Add readable UTF-8-or-null name/path aliases, clearer field/file and EXR errors, and explicit ID-name rewrite refusal.
+- Byte-identical diffs prove equality; all diff reports include `difference_count`. Returned CLI comparison/read errors now emit an inconclusive v1 report with typed errors, retaining exit 2.
+- Incomplete pack-info explicitly says INCOMPLETE and lists every missing physical path, decoded or hex for non-UTF-8 bytes, for single and multiple roots.
+- Full argument/option/default help for every command, checked against documented flags.
+- Linked-layout source/library facts retain their worded refusal and trace fallback; no partial closure is claimed.
+- Reviewed task-oriented skill, relative offline documentation links, and decoded-payload verification instructions for changed/compressed rewrites.
+- Updated usage/stability contracts and an absolute README logo URL for package rendering.
+
+No structural editing, datablock rename or dangling-pointer policy change is included.
+
 # Oxblend 1.0.0
 
 The first release reads, inspects, traces, packs and makes guarded edits to serialized Blender files without Blender evaluation.

@@ -19,6 +19,89 @@ pub enum PathStep {
     Field(Vec<u8>),
     Index(usize),
 }
+/// Human diagnostics preserve readable fields, escaping invalid UTF-8 bytes.
+pub(crate) fn display_bytes(data: &[u8]) -> String {
+    match std::str::from_utf8(data) {
+        Ok(text) => text.to_owned(),
+        Err(_) => data
+            .iter()
+            .map(|b| {
+                std::ascii::escape_default(*b)
+                    .map(char::from)
+                    .collect::<String>()
+            })
+            .collect(),
+    }
+}
+pub(crate) fn display_path(path: &[PathStep]) -> String {
+    path.iter()
+        .map(|step| match step {
+            PathStep::Field(name) => display_bytes(name),
+            PathStep::Index(index) => format!("[{index}]"),
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+/// Add UTF-8-or-null aliases to byte-authoritative report names and paths.
+/// Payloads, numeric bits and other binary hex are deliberately not text.
+pub(crate) fn with_text(mut value: Json) -> Json {
+    fn decoded(value: &Json) -> Json {
+        match value {
+            Json::String(hex) => {
+                let bytes = hex
+                    .as_bytes()
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        let digit = |b: u8| (b as char).to_digit(16).map(|v| v as u8);
+                        Some(digit(pair[0])? * 16 + digit(pair[1])?)
+                    })
+                    .collect::<Option<Vec<_>>>();
+                json!(
+                    bytes
+                        .filter(|_| hex.len().is_multiple_of(2))
+                        .and_then(|v| String::from_utf8(v).ok())
+                )
+            }
+            Json::Array(items) => {
+                let items = items.iter().map(decoded).collect::<Vec<_>>();
+                if items.iter().any(Json::is_null) {
+                    Json::Null
+                } else {
+                    json!(items)
+                }
+            }
+            _ => Json::Null,
+        }
+    }
+    fn visit(value: &mut Json) {
+        match value {
+            Json::Object(fields) => {
+                for child in fields.values_mut() {
+                    visit(child);
+                }
+                let aliases = fields
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        let name = key.strip_suffix("_hex")?;
+                        let textual = name.ends_with("path")
+                            || name.ends_with("paths")
+                            || name.ends_with("file")
+                            || name.ends_with("name")
+                            || name.ends_with("chain")
+                            || matches!(name, "field" | "type" | "sdna_type");
+                        (textual && !fields.contains_key(name))
+                            .then(|| (name.to_owned(), decoded(value)))
+                    })
+                    .collect::<Vec<_>>();
+                fields.extend(aliases);
+            }
+            Json::Array(items) => items.iter_mut().for_each(visit),
+            _ => (),
+        }
+    }
+    visit(&mut value);
+    value
+}
 pub fn hex(data: &[u8]) -> String {
     data.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -90,10 +173,16 @@ impl BlendFile {
                 _ => return Err(Error::new("path", "expected field name")),
             };
             let structure = &self.schema.structs[si];
-            let field_index = *structure
-                .by_name
-                .get(name.as_slice())
-                .ok_or_else(|| Error::new("missing_field", hex(name)))?;
+            let field_index = *structure.by_name.get(name.as_slice()).ok_or_else(|| {
+                Error::new(
+                    "missing_field",
+                    format!(
+                        "field '{}' not found in {} (block {block_index})",
+                        display_bytes(name),
+                        display_bytes(&self.schema().types[self.schema().structs[si].type_index])
+                    ),
+                )
+            })?;
             let field = &structure.fields[field_index];
             let parent_offset = base;
             base = add(base, field.offset)?;
@@ -181,7 +270,12 @@ impl BlendFile {
             b"short" => 2,
             b"int" | b"float" => 4,
             b"uint64_t" => 8,
-            _ => return Err(Error::new("unsupported_type", hex(kind))),
+            _ => {
+                return Err(Error::new(
+                    "unsupported_type",
+                    format!("unsupported field type '{}'", display_bytes(kind)),
+                ));
+            }
         };
         if field.element_size != width {
             return Err(Error::new("invalid_sdna", "primitive width/TLEN mismatch"));
@@ -243,7 +337,7 @@ impl BlendFile {
         }
         let mut pointer = crate::file_ops::PointerLayout {
             offset: location.offset,
-            path: format!("{path:?}"),
+            path: display_path(path),
             declared_type: self.schema().types[location.field.type_index].clone(),
             parent_type: location.parent_type.to_vec(),
             parent_offset: location.parent_offset,

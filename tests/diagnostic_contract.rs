@@ -50,6 +50,240 @@ fn empty_image_path_is_absent_but_populated_image_is_traced() {
 }
 
 #[test]
+fn summary_missing_fields_are_typed_warnings_and_id_families_are_named() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
+    for name in ["mesh-material-root.blend", "mesh-material-library.blend"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg("summary")
+            .arg(root.join(name))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        if name == "mesh-material-root.blend" {
+            assert_eq!(j["warnings"][0]["kind"], "missing_field");
+            assert_eq!(j["scenes"][0]["frame_end"], serde_json::Value::Null);
+            assert_eq!(j["collections"], serde_json::json!(["GRlive"]));
+        } else {
+            assert_eq!(j["materials"], serde_json::json!(["MAmesh"]));
+            assert_eq!(j["meshes"], serde_json::json!(["MEmesh"]));
+            assert_eq!(j["images"], serde_json::json!(["IMmesh"]));
+        }
+    }
+}
+
+#[test]
+fn missing_references_refuse_list_but_do_not_redefine_trace_completeness() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
+    let work = std::env::temp_dir().join(format!("oxblend-missing-list-{}", std::process::id()));
+    std::fs::create_dir(&work).unwrap();
+    let orphan = work.join("root.blend");
+    std::fs::copy(root.join("mesh-material-root.blend"), &orphan).unwrap();
+    for (file, missing, kind) in [
+        (
+            root.join("text-filepath.blend"),
+            "external.py",
+            "missing_asset",
+        ),
+        (orphan, "mesh-material-library.blend", "missing_library"),
+    ] {
+        for flags in [vec!["--json"], vec!["--json", "--full-info"], vec![]] {
+            let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+                .arg("list")
+                .arg(&file)
+                .args(flags)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(2));
+            assert!(out.stdout.is_empty());
+            let j: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+            assert_eq!(j["error"]["kind"], kind);
+            assert!(j["error"]["message"].as_str().unwrap().contains(missing));
+        }
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg("trace")
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(if kind == "missing_asset" { 0 } else { 2 })
+        );
+        let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(j["complete"], kind == "missing_asset");
+        assert_eq!(j["missing_path_count"], 1);
+        assert_eq!(j["referenced_paths_exist"], false);
+        assert_eq!(j["usages"][0]["exists"], false);
+        assert!(
+            j["usages"][0]["resolved_path"]
+                .as_str()
+                .unwrap()
+                .ends_with(missing)
+        );
+        assert!(
+            j["usages"][0]["asset_path"]
+                .as_str()
+                .unwrap()
+                .ends_with(missing)
+        );
+        if kind == "missing_library" {
+            assert!(
+                j["errors"][0]["library_path"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with(missing)
+            );
+            assert_eq!(j["errors"][0]["field_path"], serde_json::json!(["name"]));
+        }
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn byte_identical_diff_proves_equality_without_semantic_anchoring() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
+    let copy =
+        std::env::temp_dir().join(format!("oxblend-byte-equal-{}.blend", std::process::id()));
+    for name in ["mesh-material-library.blend", "bake-old.blend"] {
+        let source = root.join(name);
+        std::fs::copy(&source, &copy).unwrap();
+        for right in [&source, &copy] {
+            let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+                .arg("diff")
+                .arg(&source)
+                .arg(right)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(j["equal"], true);
+            assert_eq!(j["complete"], true);
+            assert_eq!(j["difference_count"], 0);
+            assert_eq!(j["differences"], serde_json::json!([]));
+        }
+    }
+    std::fs::remove_file(copy).unwrap();
+}
+
+#[test]
+fn diff_returned_errors_still_emit_an_inconclusive_v1_report() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
+    for right in ["mesh-material-root.blend", "absent.blend"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg("diff")
+            .arg(root.join("mesh-material-library.blend"))
+            .arg(root.join(right))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(report["schema"], "oxblend.diff/v1");
+        assert_eq!(report["equal"], serde_json::Value::Null);
+        assert_eq!(report["complete"], false);
+        assert_eq!(
+            report["difference_count"],
+            report["differences"].as_array().unwrap().len()
+        );
+        assert_eq!(report["errors"][0], error["error"]);
+        if right == "mesh-material-root.blend" {
+            assert_eq!(report["errors"][0]["kind"], "missing_field");
+        }
+    }
+}
+
+#[test]
+fn facts_failures_name_the_file_and_field_in_words() {
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/dependencies/mesh-material-root.blend");
+    for (command, field) in [
+        ("source-facts", "master_collection"),
+        ("library-facts", "children"),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg(command)
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let j: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        let message = j["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains(field) && message.contains("mesh-material-root.blend"),
+            "{message}"
+        );
+        assert!(!message.contains("Field(["));
+        assert!(message.contains("use trace for cross-file dependencies"));
+        assert!(out.stdout.is_empty());
+    }
+}
+
+#[test]
+fn id_name_rewrite_refusal_is_worded_and_path_rewrite_aliases_are_readable() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/dependencies/mesh-material-library.blend");
+    let work = std::env::temp_dir().join(format!("oxblend-rewrite-text-{}", std::process::id()));
+    std::fs::create_dir(&work).unwrap();
+    for (label, block, path, expected, replacement) in [
+        (
+            "rename",
+            0,
+            serde_json::json!([{"field_hex":"6964"},{"field_hex":"6e616d65"}]),
+            "4f426d657368",
+            "4f426865726f",
+        ),
+        (
+            "filepath",
+            7,
+            serde_json::json!([{"field_hex":"6e616d65"}]),
+            "2f2f746578747572652e706e67",
+            "2f2f6e65772e706e67",
+        ),
+    ] {
+        let spec = work.join(format!("{label}.json"));
+        let target = work.join(format!("{label}.blend"));
+        std::fs::write(&spec, serde_json::to_vec(&serde_json::json!({"schema":1,"edits":[{"block_index":block,"element":0,"path":path,"expected_path_hex":expected,"replacement_path_hex":replacement}]})).unwrap()).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg("rewrite")
+            .arg(&source)
+            .arg("--output")
+            .arg(&target)
+            .arg("--edits")
+            .arg(spec)
+            .output()
+            .unwrap();
+        let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        if label == "rename" {
+            assert_eq!(out.status.code(), Some(2));
+            assert_eq!(j["errors"][0]["kind"], "unsupported_edit");
+            assert!(
+                j["errors"][0]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("ID name fields are not editable")
+            );
+            assert!(!target.exists());
+        } else {
+            assert!(out.status.success());
+            assert_eq!(j["input_path"], source.to_str().unwrap());
+            assert_eq!(j["output_path"], target.to_str().unwrap());
+            assert_eq!(j["edits"][0]["before_path"], "//texture.png");
+            assert_eq!(j["edits"][0]["after_path"], "//new.png");
+            assert_eq!(j["edits"][0]["steps"][0]["field"], "name");
+        }
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
 fn zero_element_by_value_layout_refuses_before_asset_walk() {
     let file =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audit/zero-by-value.blend");

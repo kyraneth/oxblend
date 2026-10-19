@@ -279,6 +279,12 @@ fn serialized_full_info_keeps_duplicate_usage_sites_and_byte_safe_paths() {
     std::fs::write(&asset, b"independently authored resource").unwrap();
     let report = parsed(&cli(&["list", "--json", "--full-info"], &[&src]));
     assert_eq!(report["usages"].as_array().unwrap().len(), 2);
+    for usage in report["usages"].as_array().unwrap() {
+        assert!(usage.get("asset_path").unwrap().is_null());
+        assert!(usage.get("resolved_path").unwrap().is_null());
+        assert_eq!(usage["exists"], true);
+        assert!(usage["path_full_field"]["name"].is_string());
+    }
     let paths = report["files"][src.to_str().unwrap()].as_array().unwrap();
     assert_eq!(paths.len(), 1);
     assert_eq!(
@@ -294,6 +300,38 @@ fn serialized_full_info_keeps_duplicate_usage_sites_and_byte_safe_paths() {
         )
     );
 }
+#[test]
+fn incomplete_pack_overview_lists_decoded_or_hex_missing_paths() {
+    let w = Work::new();
+    let src = fixture(&w.0, &[(b"//texture.png", 1), (b"//bad\xff.png", 1)]);
+    for sequence in [false, true] {
+        let target = w.0.join(if sequence { "sequence" } else { "single" });
+        let mut command = Command::new(env!("CARGO_BIN_EXE_oxblend"));
+        command
+            .arg(if sequence { "pack-sequence" } else { "pack" })
+            .arg(&src);
+        if sequence {
+            command.arg("-t");
+        }
+        let out = command.arg(&target).output().unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(report["complete"], false);
+        let info = std::fs::read_to_string(target.join("pack-info.txt")).unwrap();
+        assert!(info.contains("INCOMPLETE"), "{info}");
+        assert!(info.contains("Missing files: 2\n"), "{info}");
+        for missing in report["missing"].as_array().unwrap() {
+            let shown = missing["absolute_path"]
+                .as_str()
+                .map(|p| format!("{p:?}"))
+                .unwrap_or_else(|| {
+                    format!("hex:{}", missing["absolute_path_hex"].as_str().unwrap())
+                });
+            assert!(info.contains(&format!("Missing file: {shown}\n")), "{info}");
+        }
+    }
+}
+
 #[test]
 fn serialized_address_refusal_and_packed_reporting() {
     let w = Work::new();
