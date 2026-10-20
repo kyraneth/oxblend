@@ -3,7 +3,7 @@ name: oxblend
 description: "Inspects saved Blender files and their dependencies with Oxblend. Use when summarizing a .blend, finding missing files, packing for a render farm, comparing versions, repathing an image or reading EXR header values without starting Blender."
 ---
 
-# Oxblend 1.3.1
+# Oxblend 1.3.2
 
 Copyright (c) 2026 Mario Hawat. CC BY 4.0:
 https://creativecommons.org/licenses/by/4.0/ . Software is MIT.
@@ -52,8 +52,8 @@ run() {
 run version --version
 ```
 All commands have `COMMAND --help`; `oxblend skill` prints this guide offline.
-Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.3.1/docs/USAGE.md)
-and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.3.1/docs/STABILITY.md).
+Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.3.2/docs/USAGE.md)
+and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.3.2/docs/STABILITY.md).
 These links are not installed files. Examples below use `run`; substitute actual inputs.
 Capture the producer before filtering: a closed stdout now exits 2 with
 `broken_pipe`, not success. Pipelines can hide that producer status unless the
@@ -137,6 +137,15 @@ libraries in `list`, without expanding the overridden source asset graph;
 Missing expansions retain their resolved declaration/pattern; absent libraries'
 unknown contents cannot be discovered. Missing IDs, unreadable/corrupt files and
 incomplete pointer traversal still refuse with no listing. Use trace for details.
+Since 1.3.2, precisely qualified legacy node-group, copy-transforms and Object
+driver ID slots in linked libraries can emit `library_null_pointer` warnings
+without incomplete traversal. Keep stderr: ordinary list emits structured
+warning envelopes there; full-info also includes `warnings`. Trace retains each
+site's owner, field, offset, saved pointer and library chain. `native_action`
+distinguishes legacy node-group reconstruction, saved override reapplication,
+and ordinary missing-ID clearing. Overrides can restore a non-NULL native
+target even though the saved slot was unresolvable.
+This does not tolerate corrupt main-file structure or arbitrary dangling slots.
 Only trace/list accept `--low-memory`; it trades CPU/IO/temp disk for lower memory,
 not a memory ceiling. `source-facts` answers per-file collection/object/library
 closure; `library-facts` answers library collection/object discovery. Neither is a
@@ -162,6 +171,12 @@ linked-ID packs INCOMPLETE and lists missing physical paths (decoded or hex).
 It is still not a native validation certificate. ZIP member paths
 are virtual. `output_written`/`archive_written` do not imply completeness or crash
 persistence; durability defaults to `none`. Inspect destinations before retrying.
+Inspect `library_pointer_clears` too: this is the guarded repair plan for those
+specific linked-library slots, including unselected copied records. Pack zeros
+the saved garbage pointer, never copies it verbatim; Blender recreates legacy
+node groups and reapplies saved library overrides on open. Dry-run writes nothing. `rewrites[].edits` remains path-only;
+`files[].rewritten` includes path edits or clears, and `output_written` proves
+publication. Pack-info also records clears. This is not general pointer editing.
 Even a complete pack covers the selected serialized closure, not render validation;
 review unrelocated-path warnings and reopen/test in compatible Blender before use.
 For native verification, isolate the package from original sources and traverse

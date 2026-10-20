@@ -24,6 +24,7 @@ mod file_ops_tests;
 mod id_codes;
 mod input;
 mod kernel_copy;
+mod library_compat;
 pub mod overrides;
 #[cfg(test)]
 mod owner_compat_tests;

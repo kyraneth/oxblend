@@ -214,10 +214,45 @@ pub enum TraceWarning {
     SilencedPointer {
         failure: TraceFailure,
     },
+    /// A qualified missing saved ID slot: native NULL or legacy reconstruction.
+    LibraryNullPointer {
+        failure: TraceFailure,
+        pointer_address: u64,
+        offset: usize,
+        native_action: String,
+        library_chain: Vec<Vec<u8>>,
+    },
     UnknownAssetCode {
         owner_file: Vec<u8>,
         code: Vec<u8>,
     },
+}
+impl TraceWarning {
+    pub(crate) fn json(&self) -> Json {
+        crate::value::with_text(match self {
+            Self::MissingLibrary {
+                owner_file,
+                library_path,
+            } => {
+                json!({"kind":"missing_library","owner_file_hex":hex(owner_file),"library_path_hex":hex(library_path)})
+            }
+            Self::SilencedPointer { failure } => {
+                json!({"kind":"silenced_pointer","failure":failure.json()})
+            }
+            Self::LibraryNullPointer {
+                failure,
+                pointer_address,
+                offset,
+                native_action,
+                library_chain,
+            } => {
+                json!({"kind":"library_null_pointer","failure":failure.json(),"pointer_address":pointer_address.to_string(),"offset":offset,"library_chain_hex":library_chain.iter().map(|p|hex(p)).collect::<Vec<_>>(),"native_action":native_action,"pack_action":"clear_to_null"})
+            }
+            Self::UnknownAssetCode { owner_file, code } => {
+                json!({"kind":"unknown_asset_code","owner_file_hex":hex(owner_file),"code_hex":hex(code)})
+            }
+        })
+    }
 }
 #[derive(Debug)]
 #[non_exhaustive]
@@ -554,13 +589,39 @@ impl Context<'_> {
             result => result,
         };
         match resolved {
-            Ok(b) => Ok(b.map(|block| View {
-                file: v.file,
-                block,
-                element: 0,
-            })),
+            Ok(b) => {
+                if let Some(block) = b
+                    && self.file(v).reader.dna_type_id(v.block).is_ok_and(|ty| {
+                        matches!(ty, b"NodesModifierData" | b"bTransLikeConstraint")
+                    })
+                {
+                    let reader = &self.file(v).reader;
+                    let offset = reader
+                        .locate_field(v.block, v.element, &steps)
+                        .map_err(|e| self.fault(v, p, e))?
+                        .offset;
+                    crate::library_compat::validate_present(reader, v.block, offset, block)
+                        .map_err(|e| self.fault(v, p, e))?;
+                }
+                Ok(b.map(|block| View {
+                    file: v.file,
+                    block,
+                    element: 0,
+                }))
+            }
             Err(e) => {
                 let failure = self.fault(v, p, e);
+                if matches!(failure.kind, FailureKind::DanglingPointer) && v.file != 0 {
+                    let offset = self
+                        .file(v)
+                        .reader
+                        .locate_field(v.block, v.element, &steps)
+                        .map_err(|e| self.fault(v, p, e))?
+                        .offset;
+                    if self.library_null(v, offset, &failure)? {
+                        return Ok(None);
+                    }
+                }
                 if matches!(failure.kind, FailureKind::DanglingPointer)
                     && self.options.pointers == PointerMode::NonStrict
                 {
@@ -575,6 +636,26 @@ impl Context<'_> {
                 }
             }
         }
+    }
+    fn library_null(&mut self, v: View, offset: usize, failure: &TraceFailure) -> T<bool> {
+        let clear = crate::library_compat::missing_id(&self.file(v).reader, v.block, offset)
+            .map_err(|e| self.fault(v, &[], e))?;
+        let Some(clear) = clear else { return Ok(false) };
+        if self.report.warnings.iter().any(|warning| {
+            matches!(warning,
+            TraceWarning::LibraryNullPointer {failure: prior, offset, ..}
+                if prior.owner_file == failure.owner_file && *offset == clear.offset)
+        }) {
+            return Ok(true);
+        }
+        self.report.warnings.push(TraceWarning::LibraryNullPointer {
+            failure: failure.clone(),
+            pointer_address: clear.address,
+            offset: clear.offset,
+            native_action: clear.native_action().into(),
+            library_chain: self.file(v).chain.clone(),
+        });
+        Ok(true)
     }
     fn ptr(&mut self, v: View, p: &[&str]) -> T<Option<View>> {
         let a = self.address(v, p)?;
@@ -1449,6 +1530,12 @@ impl Context<'_> {
                     };
                     let failure = self.fault(v, &[&field.path], error);
                     if matches!(failure.kind, FailureKind::DanglingPointer)
+                        && v.file != 0
+                        && self.library_null(v, field.offset, &failure)?
+                    {
+                        continue;
+                    }
+                    if matches!(failure.kind, FailureKind::DanglingPointer)
                         && self.options.pointers == PointerMode::NonStrict
                     {
                         self.report.complete = false;
@@ -1605,10 +1692,33 @@ impl Context<'_> {
                 PathStep::Field(b"id".to_vec()),
             ];
             let reader = &self.file(v).reader;
-            let target = reader
-                .get_pointer(v.block, v.element, &steps)
-                .map_err(|e| self.fault(v, &[field, "id"], e))?;
+            let result = reader.get_pointer(v.block, v.element, &steps);
+            let target = match result {
+                Ok(target) => target,
+                Err(error) => {
+                    let failure = self.fault(v, &[&format!("{field}[{i}].id")], error);
+                    if matches!(failure.kind, FailureKind::DanglingPointer) && v.file != 0 {
+                        let offset = self
+                            .file(v)
+                            .reader
+                            .locate_field(v.block, v.element, &steps)
+                            .map_err(|e| self.fault(v, &[field], e))?
+                            .offset;
+                        if self.library_null(v, offset, &failure)? {
+                            continue;
+                        }
+                    }
+                    return Err(failure);
+                }
+            };
             if let Some(block) = target {
+                let reader = &self.file(v).reader;
+                let offset = reader
+                    .locate_field(v.block, v.element, &steps)
+                    .map_err(|e| self.fault(v, &[field], e))?
+                    .offset;
+                crate::library_compat::validate_present(reader, v.block, offset, block)
+                    .map_err(|e| self.fault(v, &[field], e))?;
                 out.push(View {
                     block,
                     file: v.file,
@@ -2249,6 +2359,132 @@ mod serialized_vectors {
         // Neither unrelated Library headers nor the reference ID's asset
         // graph are scanned; the physical source declaration is sufficient.
         assert_eq!(listing.files.len(), 1);
+    }
+
+    #[test]
+    fn listing_retains_indirect_override_library_with_duplicate_filename() {
+        // Issue #7: an indirectly selected local override retains its physical
+        // source declaration, even when another library has the same basename.
+        // The source's overridden graph and unrelated headers stay unselected.
+        let structures = [
+            (
+                "ID",
+                80,
+                vec![
+                    ("char", "name[64]"),
+                    ("Library", "*lib"),
+                    ("IDOverrideLibrary", "*override_library"),
+                ],
+            ),
+            ("Object", 80, vec![("ID", "id")]),
+            ("IDOverrideLibrary", 8, vec![("ID", "*reference")]),
+            ("Library", 208, vec![("ID", "id"), ("char", "name[128]")]),
+        ];
+        let id = |name: &[u8], library: u64, definition: u64| {
+            let mut data = fixed(name, 64);
+            data.extend_from_slice(&library.to_le_bytes());
+            data.extend_from_slice(&definition.to_le_bytes());
+            data
+        };
+        let library = |name: &[u8], path: &[u8]| {
+            let mut data = id(name, 0, 0);
+            data.extend(fixed(path, 128));
+            data
+        };
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        struct Owned(PathBuf);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let work = Owned(std::env::temp_dir().join(format!(
+            "oxblend-test-indirect-override-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )));
+        std::fs::create_dir(&work.0).unwrap();
+        std::fs::create_dir(work.0.join("env")).unwrap();
+        std::fs::create_dir(work.0.join("props")).unwrap();
+        let root = work.0.join("root.blend");
+        let child = work.0.join("child.blend");
+        let direct = work.0.join("env/trash.blend");
+        let indirect = work.0.join("props/trash.blend");
+        std::fs::write(
+            &root,
+            saved(
+                &structures,
+                &[
+                    (b"ID", 1, 0, id(b"OBselected", 2, 0)),
+                    (b"LI", 2, 3, library(b"LIchild", b"//child.blend")),
+                    (b"ID", 3, 0, id(b"OBsource", 4, 0)),
+                    (b"LI", 4, 3, library(b"LItrash.blend", b"//env/trash.blend")),
+                ],
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            saved(
+                &structures,
+                &[
+                    (b"OB", 1, 1, id(b"OBselected", 0, 2)),
+                    (b"DATA", 2, 2, 3u64.to_le_bytes().to_vec()),
+                    (b"ID", 3, 0, id(b"OBsource", 4, 0)),
+                    (
+                        b"LI",
+                        4,
+                        3,
+                        library(b"LItrash.blend.001", b"//props/trash.blend"),
+                    ),
+                    (b"LI", 5, 3, library(b"LIunused", b"//unused.blend")),
+                ],
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &direct,
+            saved(&structures, &[(b"OB", 1, 1, id(b"OBsource", 0, 0))]),
+        )
+        .unwrap();
+        // Existence is sufficient for a declaration-only reference. Opening
+        // either file would incorrectly widen the selected graph and fail.
+        std::fs::write(&indirect, b"not a selected blend input").unwrap();
+        std::fs::write(work.0.join("unused.blend"), b"not selected either").unwrap();
+
+        let (listing, opened) = listing_with_file_paths(&root, TraceOptions::default()).unwrap();
+        assert!(listing.complete, "{:?}", listing.errors);
+        assert!(listing.errors.is_empty());
+        assert_eq!(opened, vec![root.clone(), child.clone(), direct.clone()]);
+        assert_eq!(listing.usages.len(), 3);
+        let usage = listing
+            .usages
+            .iter()
+            .find(|usage| usage.asset_path == b"//props/trash.blend")
+            .unwrap();
+        assert_eq!(usage.owner_file, raw(&child));
+        assert_eq!(usage.library_chain, vec![raw(&root), raw(&child)]);
+        assert_eq!(usage.block_name, b"LItrash.blend.001");
+        assert_eq!(resolve(&child, &usage.asset_path), indirect);
+        assert!(listing.usages.iter().any(|usage| {
+            usage.owner_file == raw(&root) && usage.asset_path == b"//env/trash.blend"
+        }));
+        assert!(
+            listing
+                .usages
+                .iter()
+                .all(|usage| usage.asset_path != b"//unused.blend")
+        );
+
+        let traced = trace(&root, TraceOptions::default()).unwrap();
+        assert!(traced.complete, "{:?}", traced.errors);
+        assert_eq!(traced.usages.len(), 2);
+        assert!(
+            traced
+                .usages
+                .iter()
+                .all(|usage| usage.asset_path != b"//props/trash.blend")
+        );
     }
 
     #[test]
@@ -2908,7 +3144,7 @@ impl TraceFailure {
 }
 impl TraceReport {
     pub fn json(&self) -> Json {
-        let mut value = json!({"schema":1,"complete":self.complete,"usages":self.usages.iter().map(Usage::json).collect::<Vec<_>>(),"errors":self.errors.iter().map(TraceFailure::json).collect::<Vec<_>>(),"warnings":self.warnings.iter().map(|w|match w{TraceWarning::MissingLibrary{owner_file,library_path}=>json!({"kind":"missing_library","owner_file_hex":hex(owner_file),"library_path_hex":hex(library_path)}),TraceWarning::SilencedPointer{failure}=>json!({"kind":"silenced_pointer","failure":failure.json()}),TraceWarning::UnknownAssetCode{owner_file,code}=>json!({"kind":"unknown_asset_code","owner_file_hex":hex(owner_file),"code_hex":hex(code)})}).collect::<Vec<_>>()});
+        let mut value = json!({"schema":1,"complete":self.complete,"usages":self.usages.iter().map(Usage::json).collect::<Vec<_>>(),"errors":self.errors.iter().map(TraceFailure::json).collect::<Vec<_>>(),"warnings":self.warnings.iter().map(TraceWarning::json).collect::<Vec<_>>()});
         value["missing_link_counts"] = json!({"missing_id":self.errors.iter().filter(|e|matches!(e.kind, FailureKind::MissingId)).count(),"missing_library":self.errors.iter().filter(|e|matches!(e.kind, FailureKind::MissingLibrary)).count()});
         value["missing_path_count"] = json!(
             value["usages"]

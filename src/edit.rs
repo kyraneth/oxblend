@@ -403,6 +403,32 @@ pub(crate) fn rewrite_opened(
     reader: &BlendFile,
     compress: bool,
 ) -> Result<EditReport> {
+    rewrite_opened_cleared(
+        input,
+        new_output,
+        requested,
+        options,
+        source,
+        metadata,
+        reader,
+        compress,
+        &[],
+    )
+}
+
+/// Pack-only, narrowly qualified native-null repairs; not public pointer editing.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rewrite_opened_cleared(
+    input: &Path,
+    new_output: &Path,
+    requested: &[PathRewrite],
+    options: &EditOptions,
+    source: &crate::physical::Physical<'_>,
+    metadata: &std::fs::Metadata,
+    reader: &BlendFile,
+    compress: bool,
+    clears: &[crate::library_compat::PointerClear],
+) -> Result<EditReport> {
     let family = source.family().map_err(io)?;
     let (edits, errors) = prepared(reader, requested);
     let mut report = EditReport {
@@ -428,7 +454,42 @@ pub(crate) fn rewrite_opened(
     if !report.errors.is_empty() {
         return Ok(report);
     }
-    let modified = report.edits.iter().any(|e| e.write_length != 0);
+    let mut spans = path_spans(&report.edits);
+    for clear in clears {
+        let block = reader.block(clear.block)?;
+        let relative = clear
+            .offset
+            .checked_sub(block.data_offset)
+            .ok_or_else(|| Error::new("bounds", "library pointer clear precedes block"))?;
+        let actual =
+            crate::library_compat::missing_id(reader, clear.block, relative)?.ok_or_else(|| {
+                Error::new(
+                    "expected_old",
+                    "library pointer no longer qualifies for clearing",
+                )
+            })?;
+        if actual.offset != clear.offset || actual.address != clear.address {
+            return Err(Error::new(
+                "expected_old",
+                "library pointer clear differs from captured site",
+            ));
+        }
+        spans.push(Span {
+            offset: clear.offset,
+            bytes: vec![0; reader.header().pointer_size],
+        });
+    }
+    spans.sort_by_key(|s| s.offset);
+    if spans
+        .windows(2)
+        .any(|w| w[0].offset.saturating_add(w[0].bytes.len()) > w[1].offset)
+    {
+        return Err(Error::new(
+            "edit_conflict",
+            "overlapping path and library pointer clears",
+        ));
+    }
+    let modified = !spans.is_empty();
     let inspected;
     let admission = if let Some(admission) = source.captured_admission(input) {
         admission
@@ -451,14 +512,14 @@ pub(crate) fn rewrite_opened(
     let result = (|| {
         let mut staging = AtomicOutput::create(metadata, new_output)?;
         if compress {
-            crate::edit_container::compress_seek(source, reader, &report.edits, &mut staging.file)?;
+            crate::edit_container::compress_seek(source, reader, &spans, &mut staging.file)?;
         } else if modified {
-            crate::edit_container::emit(
+            crate::edit_container::emit_spans(
                 source,
                 reader,
                 family,
                 seek,
-                &report.edits,
+                &spans,
                 &mut staging.file,
             )?;
         } else {

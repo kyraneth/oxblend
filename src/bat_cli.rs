@@ -260,6 +260,16 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
             low_memory,
         },
     )?;
+    // Keep the stable member-only stdout shape; native-null compatibility is
+    // explicit on stderr even for ordinary (non-full-info) listings.
+    for warning in &report.warnings {
+        if matches!(warning, trace::TraceWarning::LibraryNullPointer { .. }) {
+            eprintln!(
+                "{}",
+                serde_json::json!({"schema":1,"warning":warning.json()})
+            );
+        }
+    }
     for e in &report.errors {
         // Missing physical declarations permit an incomplete listing below.
         // Other incomplete serialized traces still refuse; trace exposes details.
@@ -341,7 +351,7 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
             );
         }
         if full {
-            let mut value = serde_json::json!({"files":value,"usages":report.usages.iter().map(trace::Usage::json).collect::<Vec<_>>(),"packed":packed_resources(input, low_memory)?});
+            let mut value = serde_json::json!({"files":value,"usages":report.usages.iter().map(trace::Usage::json).collect::<Vec<_>>(),"packed":packed_resources(input, low_memory)?,"warnings":report.warnings.iter().map(trace::TraceWarning::json).collect::<Vec<_>>()});
             if missing_error.is_some() {
                 value["complete"] = serde_json::json!(false);
             }

@@ -8,6 +8,16 @@ Each file owns its pointer index. ID namespaces and contiguous owner-DATA runs a
 
 Trace lists dependencies, not append-origin `library_weak_reference` metadata. Trace is an invocation-owned asset walk with byte-safe identities, explicit provenance and final source guards. Pack captures inputs, validates the dependency plan and guarded rewrites, then publishes completed files or one ZIP. Compressed inputs stream directly from a checked source descriptor into one immutable decoded snapshot; no full encoded buffer exists even during decoding. Raw capture is already the decoded data; opaque assets retain their captured bytes. A same-pass immutable frame/table verdict binds source device/inode/size/mtime/ctime (including nanoseconds); physical admission borrows the owning immutable snapshot, so a different decoded backing cannot be substituted. Write admission reuses that verdict and preserves malformed-table error kind, message and phase. No live descriptor is retained per snapshot. Physical no-op/parsed-asset copies reopen the guarded source and use Linux `copy_file_range`, looping on every positive return. First-call zero, `EXDEV`, `ENOSYS` or `EOPNOTSUPP` before any progress permit a buffered user-space fallback: compressed inputs stream from the FD, raw inputs write their already captured physical bytes without rereading. Zero after progress and all other or after-progress errors refuse. Signature and length checks surround transport, and a final source check follows output verification immediately before publication. Editing uses expected-old guards and destination-owned exclusive staging with atomic no-replace publication. No background daemon, persistent cache or global pointer map is required.
 
+Linked-library compatibility has one narrow owner (`library_compat`): it proves
+observed nullable ID slots, source-SDNA extents and native callers before treating
+an absent lib-map entry as a warning. It never substitutes for structural/DATA
+resolution. Pack reuses the same proof for expected-old NULL clears across copied
+libraries, merging those spans with path spans in the existing checked emitter.
+It reports the repair plan separately from path edits. Main-file admission and
+all other graph/write refusals remain strict; Blender, not Oxblend, reconstructs
+the qualified legacy realization node groups and reapplies library overrides
+on open.
+
 Local diagnostics use the vendored MIT flattrace v1 writer. The CLI owns a
 process writer with exclusive access; worker spans capture the long-lived command
 parent, not short-lived planning scopes. File open, index/schema, command,

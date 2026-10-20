@@ -165,6 +165,21 @@ field happens to look similar.
 
 A trace discovers references. `complete` means the trace itself completed, not that all referenced files exist. Each usage adds `resolved_path_hex`, UTF-8-or-null `resolved_path`, and `exists` (on-disk observation when the JSON is produced). For sequence, glob and UDIM declarations, `exists` means at least one expanded regular-file member exists; directories count as present. `missing_path_count` counts usage sites with `exists:false`, not unique missing files. `referenced_paths_exist` summarizes that count; none of these fields verifies file contents, every sequence frame, or Blender evaluation. Empty asset paths represent no external reference; populated paths are never silently dropped by that rule. Unknown codes can be warning-only without clearing complete, so inspect warnings. An ID named by a linked stub but absent from an existing library is typed `missing_id` external incompleteness. `trace` and `pack` retain the root, library, exact saved ID name/code and referencing chain; both exit 2, while pack publishes other available members. Counts describe referencing sites/chains, not unique absent IDs. `list` conservatively exits 2 (`incomplete_trace`) with no listing for `missing_id`: use `trace` or `pack` for typed details. Since 1.3.1, missing physical assets or libraries make `list` print the full available listing plus missing declarations, then exit 2 with a typed stderr error. Text appends ` [missing]` to each absent member. In this incomplete case, `--json` emits `{"complete":false,"files":{"OWNER":[{"path":"MEMBER","missing":false},{"path":"ABSENT","missing":true}]}}`. Every member has an explicit boolean; missing unexpanded sequence/glob/UDIM declarations retain their resolved pattern. `--full-info` uses the same incomplete `files` records and adds its existing `usages`/`packed` fields. Owner and member paths retain the ordinary list native-byte encoding (`bytes-hex:` and `utf8:` escapes). Successful listings retain exactly the existing map of string arrays (or full-info object), without a new envelope. Saved override references in selected library IDs also retain their physical source-library declarations in `list`, without expanding the overridden source asset graph or changing `trace`/`pack` selection. Unrelated unused Library headers remain excluded. Missing-ID, unreadable/corrupt input or library, and incomplete pointer traces still refuse with no listing. Use `trace` for per-usage diagnostic details; an incomplete list cannot enumerate unknown contents of an absent library.
 
+Since 1.3.2, specific native-tolerated missing ID-map slots in linked libraries
+produce `library_null_pointer` warnings, not incomplete traversal: legacy header-301
+`Realize Instances 2.93 Legacy` node modifiers, copy-transforms constraint targets
+and active Object driver targets. Diagnostics identify each usage and distinguish
+the legacy node-group compatibility profile, saved override reapplication, and
+ordinary missing-ID clearing. The legacy label does not prove fresh generation
+or native phase ordering; the verified groups are recovered from reference
+libraries on override owners. A missing saved slot need not remain NULL after
+Blender reapplies its library override.
+Ordinary list keeps stdout unchanged and prints structured warning JSON on
+stderr; full-info also includes `warnings`. Main-file corruption, structural
+pointers, ambiguous/present-invalid targets and unqualified missing slots still
+refuse. See [STABILITY](STABILITY.md#132-linked-library-compatibility) for exact
+qualification and pack's guarded pointer-clearing contract.
+
 A missing/unreadable library can produce an incomplete report; a final input-signature guard can instead return a hard error with no report. Handle both.
 
 Default trace/list retain raw read windows or decoded compressed bytes. Opt-in `--low-memory` uses lazy seekable-zstd frame reads with private unnamed spill storage; gzip/non-seekable zstd use checked full-stream decoding to spill. It trades speed and temporary disk use for lower memory use. A partial read does not certify full-source checksums. `blocks` remains streaming without spill or retained decoded frames. Memory can still grow with indexes and reports; there is no memory ceiling. Whole-file census is diagnostic, not a semantic reconstruction certificate. Read-only pointer profiles do not automatically authorize writes.
@@ -180,6 +195,23 @@ Options: `--exclude GLOB...`/`-e` (repeatable), `--noop`/`--dry-run`/`-n`, `--re
 All roots/traces/planning validate before writing. Every selected root must lie lexically within the existing project directory. Single-root project members use relative layout; external dependencies use `_outside_project`. Sequence hierarchy strips the leading root separator: `/project/shots/a.blend` becomes `package/project/shots/a.blend`. Paths use lexical spelling, not canonical symlink targets.
 
 A trustworthy plan with missing disk assets/libraries still publishes available members, exits 2, and supplies one `missing_asset`/`missing_library` error per resolved path with its referencing block in the JSON report. For both single- and multi-root packs, pack-info states `INCOMPLETE` when physical files or linked IDs are missing. It includes `Missing files: N\n` for nonzero distinct missing physical paths and a `Missing file: PATH\n` line for each. PATH is quoted/escaped decoded UTF-8, or `hex:...` for non-UTF-8 native bytes. Do not ship an incomplete pack; retain the JSON report too. Both forms append missing-link diagnostics: nonzero `Missing libraries: N\n`, then nonzero `Missing linked IDs: N\n`, then one `KIND: RECORD\n` per `missing_links` record in report order. KIND is `missing_library` or `missing_id`; RECORD is the exact compact JSON record with sorted keys, no spacing, authoritative hex and UTF-8-or-null aliases. Zero-count headings are omitted; unrelocated-path warnings follow. Counts are reference sites/chains, not unique absent identities. `planning_complete:true` is honest here; `complete:false` is separate. An incomplete/untrustworthy trace (including an existing unreadable library) returns `incomplete_trace`, `planning_complete:false` and publishes no files, directory, info or ZIP.
+
+Pack clears those precisely qualified copied-library slots to NULL rather than
+publishing their garbage addresses. `library_pointer_clears` describes each
+expected-old pointer, decoded offset/width, field and native action; per-file
+`output_written` remains the publication evidence. Dry-run records only the plan.
+The scan includes unselected library records; the selected main remains strict.
+`rewrites[].edits` contains path edits only, while `files[].rewritten` includes
+path edits or pointer clears. Pack-info records the clears. Native Blender
+reconstructs legacy node groups and reapplies library overrides when opening
+the package; no arbitrary pointer
+setter or graph synthesis is exposed. Reopen in Blender to validate its linked
+data; ordinary missing-file incompleteness remains independent of these warnings.
+The safety guarantee concerns recognized dependency ID slots. Non-dependency
+UI/runtime caches remain byte-for-byte as stored, including an observed stale
+`TreeStoreElem.id` Outliner cache in a linked library whose UI Blender does not
+load. A pointer census can still show such unresolved cache/runtime values;
+pack does not promise that every pointer-shaped value in a file has a target.
 
 ZIP is delivered: private staging, validated UTF-8 member names, ZIP64 widths, CRC and atomic no-replace outer publication. Images `.jpg/.jpeg/.exr` and `bat-debug.log` STORE; other members DEFLATE. Report member paths are virtual ZIP entries, not filesystem files. `archive_written` and outer durability own publication/persistence. Later IO failure in a directory pack may leave completed members; no package transaction, merge/resume or automatic retry is promised.
 

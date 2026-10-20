@@ -1,6 +1,6 @@
 //! Container-aware stream emitter. No whole decoded/compressed arena.
 use crate::checked::{add, mul};
-use crate::edit::{EditRange, Span, path_spans, write_spans};
+use crate::edit::{Span, write_spans};
 use crate::edit_output::io;
 use crate::edit_xxh::Xxh64;
 use crate::physical::Physical;
@@ -384,7 +384,7 @@ fn emit_seek(
 pub(crate) fn compress_seek(
     source: &Physical<'_>,
     reader: &BlendFile,
-    edits: &[EditRange],
+    edits: &[Span],
     output: &mut File,
 ) -> Result<()> {
     let quantum = 1 << 20;
@@ -409,20 +409,10 @@ pub(crate) fn compress_seek(
             frames,
             descriptor: 0x80,
         },
-        &path_spans(edits),
+        edits,
         output,
         true,
     )
-}
-pub(crate) fn emit(
-    source: &Physical<'_>,
-    reader: &BlendFile,
-    family: &str,
-    seek: Option<&SeekTable>,
-    edits: &[EditRange],
-    output: &mut File,
-) -> Result<()> {
-    emit_spans(source, reader, family, seek, &path_spans(edits), output)
 }
 pub(crate) fn emit_spans(
     source: &Physical<'_>,

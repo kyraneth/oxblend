@@ -1,4 +1,6 @@
-use crate::edit::{Durability, EditOptions, EditReport, PathRewrite, prepared, rewrite_opened};
+use crate::edit::{
+    Durability, EditOptions, EditReport, PathRewrite, prepared, rewrite_opened_cleared,
+};
 use crate::edit_output::{AtomicOutput, create_directories, io_at, sync_end};
 use crate::input::PackInputs;
 use crate::trace::{
@@ -54,6 +56,8 @@ pub struct PackReport {
     pub missing: Vec<Usage>,
     /// Unselected copied-library paths retained verbatim, never write admission.
     pub unrelocated_unselected_paths: Vec<Usage>,
+    /// Guarded pointer-clear plan; publication is reported by each owning file.
+    pub library_pointer_clears: Vec<Json>,
     pub info_path: Option<PathBuf>,
     pub info_written: bool,
     pub info_durability_completed: bool,
@@ -98,7 +102,7 @@ impl PackReport {
             .filter(|v| v["kind"] == "missing_library")
             .count();
         crate::value::with_text(
-            json!({"schema":1,"operation":"pack","input_path_hex":raw_hex(&self.input),"legacy_input_trace_scope":"first-root-only","input_paths_hex":self.inputs.iter().map(|p|raw_hex(p)).collect::<Vec<_>>(),"root_traces":self.inputs.iter().zip(&self.root_traces).map(|(p,t)|json!({"input_path_hex":raw_hex(p),"trace":t.json()})).collect::<Vec<_>>(),"keep_hierarchy":self.keep_hierarchy,"directory_path_hex":raw_hex(&self.directory),"planning_complete":self.planning_complete,"directory_created":self.directory_created,"noop":self.noop,"compression_requested":self.compressed,"archive":self.archive,"archive_written":self.archive_written,"archive_entry_paths_not_filesystem_paths":self.archive,"complete":self.complete,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"trace":self.trace.json(),"files":self.files.iter().map(|f|json!({"input_path_hex":raw_hex(&f.input),"output_path_hex":raw_hex(&f.output),"output_written":f.output_written,"durability_completed":f.durability_completed,"rewritten":f.rewritten})).collect::<Vec<_>>(),"rewrites":self.rewrites.iter().map(EditReport::json).collect::<Vec<_>>(),"missing_links":links,"missing_link_counts":{"missing_id":missing_ids,"missing_library":missing_libraries},"missing":self.missing.iter().map(|u| { let mut v=u.json(); v["absolute_path_hex"]=json!(raw_hex(&crate::trace::resolve(&bytes_path(&u.owner_file), &u.asset_path))); v }).collect::<Vec<_>>(),"warnings":self.unrelocated_unselected_paths.iter().map(|u| { let r=u.path_full_field.as_ref().or(u.path_dir_field.as_ref()).expect("unrelocated path has field provenance"); json!({"kind":"unrelocated_unselected_path","owner_file_hex":hex(&u.owner_file),"owner_file":std::str::from_utf8(&u.owner_file).ok(),"block_address":u.block_address.to_string(),"id_name_hex":hex(&u.block_name),"id_name":std::str::from_utf8(&u.block_name).ok(),"field_path_hex":r.path.iter().map(|p|hex(p)).collect::<Vec<_>>(),"field_path":r.path.iter().map(|p|std::str::from_utf8(p).ok()).collect::<Option<Vec<_>>>(),"asset_path_hex":hex(&u.asset_path),"asset_path":std::str::from_utf8(&u.asset_path).ok()}) }).collect::<Vec<_>>(),"pack_info":self.info_path.as_ref().map(|p|json!({"output_path_hex":raw_hex(p),"output_written":self.info_written,"durability_completed":self.info_durability_completed})),"errors":self.errors.iter().map(|e|json!({"kind":e.kind,"message":e.message})).collect::<Vec<_>>()}),
+            json!({"schema":1,"operation":"pack","input_path_hex":raw_hex(&self.input),"legacy_input_trace_scope":"first-root-only","input_paths_hex":self.inputs.iter().map(|p|raw_hex(p)).collect::<Vec<_>>(),"root_traces":self.inputs.iter().zip(&self.root_traces).map(|(p,t)|json!({"input_path_hex":raw_hex(p),"trace":t.json()})).collect::<Vec<_>>(),"keep_hierarchy":self.keep_hierarchy,"directory_path_hex":raw_hex(&self.directory),"planning_complete":self.planning_complete,"directory_created":self.directory_created,"noop":self.noop,"compression_requested":self.compressed,"archive":self.archive,"archive_written":self.archive_written,"archive_entry_paths_not_filesystem_paths":self.archive,"complete":self.complete,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"trace":self.trace.json(),"files":self.files.iter().map(|f|json!({"input_path_hex":raw_hex(&f.input),"output_path_hex":raw_hex(&f.output),"output_written":f.output_written,"durability_completed":f.durability_completed,"rewritten":f.rewritten})).collect::<Vec<_>>(),"rewrites":self.rewrites.iter().map(EditReport::json).collect::<Vec<_>>(),"library_pointer_clears":self.library_pointer_clears,"missing_links":links,"missing_link_counts":{"missing_id":missing_ids,"missing_library":missing_libraries},"missing":self.missing.iter().map(|u| { let mut v=u.json(); v["absolute_path_hex"]=json!(raw_hex(&crate::trace::resolve(&bytes_path(&u.owner_file), &u.asset_path))); v }).collect::<Vec<_>>(),"warnings":self.unrelocated_unselected_paths.iter().map(|u| { let r=u.path_full_field.as_ref().or(u.path_dir_field.as_ref()).expect("unrelocated path has field provenance"); json!({"kind":"unrelocated_unselected_path","owner_file_hex":hex(&u.owner_file),"owner_file":std::str::from_utf8(&u.owner_file).ok(),"block_address":u.block_address.to_string(),"id_name_hex":hex(&u.block_name),"id_name":std::str::from_utf8(&u.block_name).ok(),"field_path_hex":r.path.iter().map(|p|hex(p)).collect::<Vec<_>>(),"field_path":r.path.iter().map(|p|std::str::from_utf8(p).ok()).collect::<Option<Vec<_>>>(),"asset_path_hex":hex(&u.asset_path),"asset_path":std::str::from_utf8(&u.asset_path).ok()}) }).collect::<Vec<_>>(),"pack_info":self.info_path.as_ref().map(|p|json!({"output_path_hex":raw_hex(p),"output_written":self.info_written,"durability_completed":self.info_durability_completed})),"errors":self.errors.iter().map(|e|json!({"kind":e.kind,"message":e.message})).collect::<Vec<_>>()}),
         )
     }
 }
@@ -536,6 +540,7 @@ struct Planned {
     input: PathBuf,
     output: PathBuf,
     edits: Vec<PathRewrite>,
+    clears: Vec<crate::library_compat::PointerClear>,
     metadata: Metadata,
     blend: bool,
 }
@@ -628,6 +633,7 @@ fn add_file(
             input: input.to_path_buf(),
             output: output.to_path_buf(),
             edits: Vec::new(),
+            clears: Vec::new(),
             metadata,
             blend,
         },
@@ -733,6 +739,18 @@ fn overview(
             )
             .as_bytes(),
         );
+    }
+    if !report.library_pointer_clears.is_empty() {
+        text.extend(
+            format!(
+                "Library ID pointers cleared: {}\n",
+                report.library_pointer_clears.len()
+            )
+            .as_bytes(),
+        );
+        for clear in &report.library_pointer_clears {
+            text.extend(format!("library_null_pointer: {clear}\n").as_bytes());
+        }
     }
     if !report.unrelocated_unselected_paths.is_empty() {
         text.extend(
@@ -852,6 +870,7 @@ fn pack_inner(
         rewrites: Vec::new(),
         missing: Vec::new(),
         unrelocated_unselected_paths: Vec::new(),
+        library_pointer_clears: Vec::new(),
         info_path: None,
         info_written: false,
         info_durability_completed: false,
@@ -1024,6 +1043,20 @@ fn pack_inner(
         for (owner, final_owner) in &copies {
             let snapshot = parsed.get(owner)?;
             let reader = &snapshot.reader;
+            let clears = crate::library_compat::clears(reader)?;
+            if selected.contains(owner) && !clears.is_empty() {
+                return Err(Error::new(
+                    "dangling_pointer",
+                    "known invalid ID reference in a selected main file; no outputs",
+                ));
+            }
+            for clear in &clears {
+                report.library_pointer_clears.push(json!({"kind":"library_null_pointer","owner_file_hex":raw_hex(owner),"block_index":clear.block,"block_address":reader.blocks()[clear.block].old_address.to_string(),"steps":clear.steps.iter().map(|s| match s {PathStep::Field(n)=>json!({"field_hex":hex(n)}),PathStep::Index(i)=>json!({"index":i})}).collect::<Vec<_>>(),"offset":clear.offset,"width":reader.header().pointer_size,"expected_pointer":clear.address.to_string(),"replacement_pointer":"0","native_action":clear.native_action(),"action":"clear_to_null"}));
+            }
+            files
+                .get_mut(final_owner)
+                .ok_or_else(|| unsafe_path("owner plan missing"))?
+                .clears = clears;
             let mut edits: Vec<PathRewrite> = Vec::new();
             let mut edit_keys: BTreeMap<(usize, usize, usize, usize), usize> = BTreeMap::new();
             for (_, usage) in usages.iter().enumerate().filter(|(i, u)| {
@@ -1263,7 +1296,7 @@ fn pack_inner(
             output: f.output.clone(),
             output_written: false,
             durability_completed: false,
-            rewritten: !f.edits.is_empty(),
+            rewritten: !f.edits.is_empty() || !f.clears.is_empty(),
         })
         .collect();
     if options.noop {
@@ -1328,7 +1361,7 @@ fn pack_inner(
             if file.blend {
                 let snapshot = parsed.get(source)?;
                 let source_file = snapshot.open_checked(source)?;
-                let edited = rewrite_opened(
+                let edited = rewrite_opened_cleared(
                     source,
                     &physical_output,
                     &file.edits,
@@ -1339,6 +1372,7 @@ fn pack_inner(
                     &snapshot.metadata,
                     &snapshot.reader,
                     options.compress,
+                    &file.clears,
                 )?;
                 let complete = edited.complete;
                 result.output_written = edited.output_written;

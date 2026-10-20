@@ -20,6 +20,7 @@ behind another occurrence of the same schema value.
 | --- | --- | --- | --- |
 | `src/main.rs` | `1` | `6` | inspect, get, pointer, payload, source-facts, library-facts; hard-error stderr envelope |
 | `src/summary.rs` | `1` | `1` | summary (library-owned) |
+| `src/bat_cli.rs` | `1` | `1` | list library-pointer warning stderr envelope |
 | `src/trace.rs` | `1` | `1` | trace |
 | `src/overrides.rs` | `1` | `1` | overrides |
 | `src/edit.rs` | `1` | `1` | rewrite |
@@ -299,6 +300,56 @@ Environment flattrace writers now honour `FLATTRACE_LEVEL`: 0 disables trace
 I/O, unset/empty defaults to 1, ASCII digits select a `u64`, and invalid/overflow
 values use 1 with a run-start note. Run-start `data.level` records the effective
 level. Oxblend emits the same events at 1 and 2; no events are debug-only.
+
+## 1.3.2 linked-library compatibility
+
+Strict traversal now records `library_null_pointer` warnings for precisely
+qualified absent ID-map references in linked libraries: saved header version 301
+`NodesModifierData.node_group` with type 57 and the native
+`Realize Instances 2.93 Legacy` marker; type-23 copy-transforms
+`bTransLikeConstraint.tar`; and active Object-ID `DriverVar.targets[i].id` slots.
+The source record must have its exact source-SDNA extent and native ID owner;
+constraint DATA additionally requires its matching same-owner typed caller.
+These warning sites do not make traversal incomplete. Diagnostics retain the
+owner, source block, field, decoded offset, saved address and library chain.
+`native_action` annotates the compatibility profile: legacy node-group recovery,
+library-override reapplication, or clearing an ordinary missing ID to NULL.
+In native readback, the qualified factory-floor override restores its non-NULL
+camera-rig target; derived shot overrides retain their original NULL targets.
+The `reconstruct_legacy_node_group` label is not a certificate of Blender's
+internal phase ordering or fresh group creation. The verified corpus recovers
+non-NULL reference-library groups on override owners; a non-override Nodes case
+was not natively verified. Reopen in Blender before claiming that outcome for
+another file. No missing external file or linked ID is invented for an address
+with no serialized identity. Other dangling pointers,
+ambiguous or invalid present targets, and structural faults remain refusals.
+The selected main file does not receive this library-only tolerance.
+
+Ordinary `list` preserves its member-only stdout shape and emits these structured
+warning envelopes on stderr; `--full-info` also adds `warnings`. Pack reports the
+same selected-usage warnings in its nested traces. Additive
+`library_pointer_clears` records describe the guarded repair plan, including
+unselected records in copied libraries. Pack writes NULL into those exact
+pointer-width slots after rechecking the expected saved address, role and source
+snapshot. It never copies these known dangling addresses into output. Path edits
+and pointer clears share checked non-overlapping decoded spans, container
+verification and no-replace publication. `rewrites[].edits` still describes path
+edits only; `library_pointer_clears` describes pointer changes, and each owning
+`files[].output_written` reports actual publication (a dry-run changes nothing).
+`files[].rewritten` includes either operation. Pack-info lists the clear count
+and records. In the verified corpus, native Blender recovers legacy groups and
+reapplies library data on open; Oxblend does not synthesize node graphs or claim
+evaluation/render equivalence. This is
+not a public pointer-editing API. A known invalid slot in a selected main file
+still refuses pack publication.
+
+The guarantee covers recognized dependency ID slots, not every serialized
+pointer-shaped value. Non-dependency UI and runtime caches are preserved as
+stored. An observed example is a stale `TreeStoreElem.id` Outliner cache entry
+in a linked library: Blender does not load that library's UI cache, and Oxblend
+does not treat it as an asset edge or clear it. Pointer-census diagnostics may
+therefore still report unresolved cache/runtime values in a native-equivalent
+package; this is not a claim of a literally all-pointer garbage-free file.
 
 ## Additive usability fields
 

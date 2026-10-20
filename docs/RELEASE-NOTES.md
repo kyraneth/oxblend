@@ -1,3 +1,22 @@
+# Oxblend 1.3.2
+
+- Precisely qualified absent ID references in linked libraries now produce
+  per-usage diagnostics rather than refusing the entire dependency result:
+  saved legacy realization node groups, copy-transforms targets and active
+  Object driver targets. Main-file structure and other invalid pointers remain
+  strict. List preserves stdout shapes and emits structured warnings on stderr.
+- Pack rechecks and clears these exact copied-library pointer slots to NULL,
+  including unselected records, instead of publishing garbage addresses. The
+  additive `library_pointer_clears` plan and pack-info disclose every change;
+  native Blender reconstructs legacy node groups and reapplies library overrides
+  on open, including restored non-NULL targets. No general pointer
+  editing API is added. Missing physical files/linked IDs retain their existing
+  incompleteness and exit contracts.
+- Added synthetic coverage for indirect override-source library declarations
+  with distinct paths sharing one basename; the existing listing behavior is
+  preserved without widening override-source graph traversal.
+- Updated bundled guide and usage/stability contracts for 1.3.2.
+
 # Oxblend 1.3.1
 
 - Missing physical dependencies no longer suppress `list` output.
