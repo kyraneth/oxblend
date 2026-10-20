@@ -32,6 +32,7 @@ fn help_version_and_all_commands_are_discoverable() {
         "pack-sequence",
         "exr-header",
         "pointer-census",
+        "skill",
     ] {
         assert!(
             help.split_whitespace().any(|word| word == command),
@@ -75,7 +76,8 @@ fn help_version_and_all_commands_are_discoverable() {
             );
         }
         assert!(command_help.contains("--help"));
-        assert!(!command_help.contains("See docs/USAGE.md for contracts and examples."));
+        assert!(command_help.contains("oxblend skill"));
+        assert!(!command_help.contains("docs/USAGE.md"));
     }
     let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
         .arg("--version")
@@ -92,7 +94,7 @@ fn help_version_and_all_commands_are_discoverable() {
 }
 
 #[test]
-fn closed_output_is_a_clean_exit_not_a_panic() {
+fn closed_output_is_an_explicit_error_not_false_success() {
     let source =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/trace-owner/cross-id.blend");
     let work = std::env::temp_dir().join(format!("oxblend-closed-output-{}", std::process::id()));
@@ -107,6 +109,7 @@ fn closed_output_is_a_clean_exit_not_a_panic() {
     for cmd in [
         "--help",
         "--version",
+        "skill",
         "summary",
         "inspect",
         "list",
@@ -117,7 +120,7 @@ fn closed_output_is_a_clean_exit_not_a_panic() {
         drop(reader); // Broken pipe exists before child entry, no timing race.
         let mut command = Command::new(env!("CARGO_BIN_EXE_oxblend"));
         command.arg(cmd);
-        if !cmd.starts_with("--") {
+        if !cmd.starts_with("--") && cmd != "skill" {
             command.arg(&file);
         }
         let out = command
@@ -125,17 +128,198 @@ fn closed_output_is_a_clean_exit_not_a_panic() {
             .stderr(Stdio::piped())
             .output()
             .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{cmd}: {:?}", out.status);
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "broken_pipe", "{cmd}: {error}");
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn bundled_guide_and_summary_do_not_depend_on_cwd_or_environment() {
+    let work = std::env::temp_dir().join(format!("oxblend-guidance-{}", std::process::id()));
+    std::fs::create_dir(&work).unwrap();
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_oxblend"));
+    for args in [vec!["skill"], vec!["skill", "print"]] {
+        let out = Command::new(&binary)
+            .args(args)
+            .env_clear()
+            .current_dir(&work)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(out.stderr.is_empty());
+        assert_eq!(out.stdout, include_bytes!("../skills/oxblend/SKILL.md"));
+        assert!(
+            String::from_utf8(out.stdout)
+                .unwrap()
+                .contains(&format!("# Oxblend {}", env!("CARGO_PKG_VERSION")))
+        );
+    }
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/file-ops/synthetic-empty-seed.blend");
+    let out = Command::new(&binary)
+        .arg("summary")
+        .arg(&source)
+        .env_clear()
+        .current_dir(&work)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stderr.is_empty());
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        report,
+        oxblend::summary::summarize(&oxblend::BlendFile::open(source).unwrap()).unwrap()
+    );
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn phases_are_explicit_opt_in_for_reflection_trace_and_overrides() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/file-ops/synthetic-empty-seed.blend");
+    for command in ["summary", "trace", "overrides"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg(command)
+            .arg(&source)
+            .env_remove("OXBLEND_PHASE_TIMING")
+            .output()
+            .unwrap();
         assert!(
             out.status.success(),
-            "{cmd}: {:?} {}",
-            out.status,
+            "{command}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
         assert!(
             out.stderr.is_empty(),
-            "{cmd}: {}",
+            "{command}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+        let timed = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg(command)
+            .arg(&source)
+            .env("OXBLEND_PHASE_TIMING", "1")
+            .output()
+            .unwrap();
+        assert!(timed.status.success());
+        assert_eq!(out.stdout, timed.stdout);
+        let phases: serde_json::Value = serde_json::from_slice(&timed.stderr).unwrap();
+        assert!(phases["serialize_write_seconds"].is_number());
     }
+}
+
+#[test]
+fn common_refusals_name_safe_next_commands() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/file-ops/synthetic-empty-seed.blend");
+    let file = oxblend::BlendFile::open(&source).unwrap();
+    let scene = file
+        .blocks()
+        .iter()
+        .position(|b| b.code == *b"SC\0\0")
+        .unwrap()
+        .to_string();
+    let bad_block = file.blocks().len().to_string();
+    for (args, kind) in [
+        (
+            vec![
+                "get",
+                source.to_str().unwrap(),
+                &bad_block,
+                "[\"id\",\"name\"]",
+            ],
+            "bounds",
+        ),
+        (
+            vec!["get", source.to_str().unwrap(), &scene, "[\"not_a_field\"]"],
+            "missing_field",
+        ),
+        (
+            vec!["get", source.to_str().unwrap(), &scene, "[\"r\"]"],
+            "unsupported_type",
+        ),
+        (
+            vec![
+                "get",
+                source.to_str().unwrap(),
+                &scene,
+                "[\"id\",\"name\",\"r\"]",
+            ],
+            "unsupported_type",
+        ),
+        (vec!["get", source.to_str().unwrap()], "usage"),
+        (vec!["skill", "install"], "usage"),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], kind, "{args:?}: {error}");
+        let next = &error["error"]["next_command"]["argv"];
+        if kind == "usage" {
+            assert_eq!(next, &serde_json::json!(["oxblend", args[0], "--help"]));
+        } else {
+            assert_eq!(
+                next,
+                &serde_json::json!(["oxblend", "inspect", source.to_str().unwrap()])
+            );
+        }
+        assert!(error["error"]["next_command"]["argv_hex"].is_array());
+    }
+}
+
+#[test]
+fn unknown_command_even_when_mentioned_in_help_suggests_valid_root_help() {
+    for command in ["oxblend", "every", "unknown-command"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg(command)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(
+            error["error"]["next_command"]["argv"],
+            serde_json::json!(["oxblend", "--help"])
+        );
+    }
+}
+
+#[test]
+fn next_command_preserves_non_utf8_path_without_shell_interpolation() {
+    use std::os::unix::{ffi::OsStringExt, fs::symlink};
+    let work = std::env::temp_dir().join(format!("oxblend-next-command-{}", std::process::id()));
+    std::fs::create_dir(&work).unwrap();
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/file-ops/synthetic-empty-seed.blend");
+    let path = work.join(std::ffi::OsString::from_vec(
+        b"scene-\xff;$(false).blend".to_vec(),
+    ));
+    symlink(&source, &path).unwrap();
+    let bad_block = oxblend::BlendFile::open(source)
+        .unwrap()
+        .blocks()
+        .len()
+        .to_string();
+    let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+        .arg("get")
+        .arg(&path)
+        .args([bad_block.as_str(), "[\"id\",\"name\"]"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let next = &error["error"]["next_command"];
+    assert!(next["argv"][2].is_null());
+    assert_eq!(
+        next["argv_hex"][2],
+        oxblend::value::hex(path.as_os_str().as_encoded_bytes())
+    );
     std::fs::remove_dir_all(work).unwrap();
 }

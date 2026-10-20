@@ -150,13 +150,16 @@ def check(root):
     expected = [['if', 'error', '.', 'kind', '=', '=', '"pack_project"', '{', '5', '}', 'else', 'if', 'error', '.', 'kind', '=', '=', '"pack_input"', '|', '|', 'error', '.', 'kind', '=', '=', '"missing_input"', '{', '3', '}', 'else', '{', '2', '}']]
     if exits != expected:
         raise ValueError('exit dispatch changed: '+repr(exits))
-    # Also bind success and broken-pipe handling, not just numeric dispatch.
-    joined = ' '.join(main)
-    if 'if error . kind = = "broken_pipe" { return ; }' not in joined:
-        raise ValueError('broken-pipe handling changed')
+    # Every run error must reach the dispatch, including broken_pipe. Bind the
+    # complete handler prefix, so any early-return bypass fails this inventory.
+    start = next(i for i in range(len(main)) if main[i:i+4] == ["fn", "main", "(", ")"])
+    joined = " ".join(main[start:])
+    prefix = 'fn main ( ) { let args = std : : env : : args_os ( ) . collect : : < Vec < _ > > ( ) ; if let Err ( error ) = run ( & args ) { let _ = writeln !'
+    if not joined.startswith(prefix):
+        raise ValueError("error handler bypass/shape changed")
     rows = table(doc, 'exit-codes')
     declared = {r[0][0]: r[1] for r in rows}
-    expected_rows = {'0': ['success', 'broken_pipe'], '2': ['default_error'], '3': ['pack_input', 'missing_input'], '5': ['pack_project']}
+    expected_rows = {'0': ['success'], '2': ['default_error'], '3': ['pack_input', 'missing_input'], '5': ['pack_project']}
     if len(rows) != len(declared) or declared != expected_rows:
         raise ValueError('exit-code table drift: '+repr(declared))
     print(f'STABILITY PASS: {len(kinds)} error kinds; {len(schemas)} schema emitters / {sum(schemas.values())} literal sites; 4 exit codes')

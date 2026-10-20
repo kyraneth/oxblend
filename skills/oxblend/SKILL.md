@@ -3,7 +3,28 @@ name: oxblend
 description: "Inspects saved Blender files and their dependencies with Oxblend. Use when summarizing a .blend, finding missing files, packing for a render farm, comparing versions, repathing an image or reading EXR header values without starting Blender."
 ---
 
-# Oxblend
+# Oxblend 1.2.0
+
+Copyright (c) 2026 Mario Hawat. CC BY 4.0:
+https://creativecommons.org/licenses/by/4.0/ . Software is MIT.
+This version-matched guide is bundled in the executable: `oxblend skill`
+(or `oxblend skill print`). It does not install or modify agent instructions.
+
+## Frame range and FPS — one summary call
+```sh
+oxblend summary scene.blend > summary.json 2> summary.stderr
+status=$? # Retain this producer exit before reading/filtering summary.json.
+```
+Read **every** `scenes[]` entry, in saved block/element order: `name`, `camera`,
+`frame_start`, `frame_end`, `frame_step` and `fps.{numerator,base,effective}`.
+`numerator` is saved `RenderData.frs_sec`; `base` is `frs_sec_base` decoded from
+float32; effective FPS = numerator / base. `fps.base_bits_hex` preserves the
+exact saved float32 bits. No block index, float decoding or extra `get` call is
+needed. A file can contain several Scenes; none is claimed to be active.
+Inspect `warnings`: unavailable fields are null, never guessed values. A zero
+or nonfinite base has null effective FPS and a typed warning. Nonfinite base is
+also null, with its exact bits retained. Saved ranges are not evaluated animation.
+
 Oxblend reads serialized state, not Blender evaluation, render equivalence or
 native validation. Use an explicitly supplied executable, or `oxblend` on PATH;
 do not silently switch binaries. See the [repository](https://github.com/kyraneth/oxblend).
@@ -28,15 +49,14 @@ run() {
     return "$status"
 }
 run version --version
-run help --help
-run pack-help pack --help
 ```
-All commands have `COMMAND --help`. Read the relevant
-[USAGE](../../docs/USAGE.md) section for
-specifications and flags; [STABILITY](../../docs/STABILITY.md)
-for report contracts. Examples below use `run`; substitute actual inputs.
-Never pipe the producer into `head` or a filter: a closed pipe can exit 0 with
-truncated output. Read/filter saved stdout only after the command finishes.
+All commands have `COMMAND --help`; `oxblend skill` prints this guide offline.
+Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.2.0/docs/USAGE.md)
+and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.2.0/docs/STABILITY.md).
+These links are not installed files. Examples below use `run`; substitute actual inputs.
+Capture the producer before filtering: a closed stdout now exits 2 with
+`broken_pipe`, not success. Pipelines can hide that producer status unless the
+shell uses pipefail. Read/filter saved stdout after the command finishes.
 
 Hex fields encode bytes: decode name/path/code hex before display, not payload or
 float-bit hex as text. Readable aliases beside `_hex` fields are UTF-8 or null;
@@ -189,14 +209,22 @@ schema-2 expected/type/width/mask rules before using it; it does not bypass thes
 ## Exit codes and failures
 | Exit | Meaning |
 | --- | --- |
-| 0 | Declared command contract completed (also a clean exit when a downstream pipe closes). |
-| 2 | Usage/read/write error or incomplete report. |
+| 0 | Declared command contract completed, including complete stdout delivery. |
+| 2 | Usage/read/write error, broken pipe or incomplete report. |
 | 3 | Selected input is missing or not a file for list/blocks/pack. |
 | 5 | Explicit pack project path does not exist; nothing written. |
 | Signal/other | External termination or unexpected failure; inspect the destination before retrying. |
 
 JSON/file existence alone proves nothing. Hard errors use schema-1 stderr envelopes
-with `error.kind` and worded `error.message`; stderr also has diagnostics/timings.
+with `error.kind`, worded `error.message` and optional `error.next_command`.
+The latter contains structured `argv` (UTF-8 or null) and exact native-byte
+`argv_hex`; treat them as arguments, not a shell script. Usage errors point to
+command help; field/type/index refusals point to `inspect FILE` (fact-closure
+refusals to `trace FILE`). Suggestions never execute automatically.
+Phase timing JSON is off by default. `OXBLEND_PHASE_TIMING=1 oxblend summary FILE`
+opts into interim stderr timings (also trace/overrides/reflection commands),
+until the planned T4 diagnostic trace mode replaces them. These timings are not
+a stable interface. Other reader warnings/explicit diagnostic controls remain.
 Preserve unknown kinds/added report fields; edit specs reject unknown keys.
 Report reproducible bugs to the repository's [GitHub issues](https://github.com/kyraneth/oxblend/issues)
 with safe inputs, version, argv, stdout/stderr, exit and completeness/publication

@@ -34,6 +34,7 @@ mod seek_input;
 mod stream_decode;
 #[cfg(test)]
 mod stream_decode_tests;
+pub mod summary;
 #[cfg(test)]
 #[path = "../tests/support/scratch.rs"]
 mod test_scratch;

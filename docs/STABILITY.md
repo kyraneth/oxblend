@@ -18,7 +18,8 @@ behind another occurrence of the same schema value.
 <!-- schemas -->
 | Source | Schema value | Literal sites | CLI report |
 | --- | --- | --- | --- |
-| `src/main.rs` | `1` | `7` | summary, inspect, get, pointer, payload, source-facts, library-facts; hard-error stderr envelope |
+| `src/main.rs` | `1` | `6` | inspect, get, pointer, payload, source-facts, library-facts; hard-error stderr envelope |
+| `src/summary.rs` | `1` | `1` | summary (library-owned) |
 | `src/trace.rs` | `1` | `1` | trace |
 | `src/overrides.rs` | `1` | `1` | overrides |
 | `src/edit.rs` | `1` | `1` | rewrite |
@@ -64,15 +65,19 @@ cases, not additional error kinds:
 <!-- exit-codes -->
 | Exit | Dispatch cases | Meaning |
 | --- | --- | --- |
-| `0` | `success`, `broken_pipe` | Normal return, including help/version; broken-pipe errors are deliberately silenced. Not proof the consumer received the whole output. |
-| `2` | `default_error` | Every other returned error, including usage and incomplete reports. |
+| `0` | `success` | Normal return, including help/version; stdout write/flush completed. |
+| `2` | `default_error` | Every other returned error, including broken_pipe, usage and incomplete reports. |
 | `3` | `pack_input`, `missing_input` | Those two input error kinds only. |
 | `5` | `pack_project` | Project-selection error only. |
 <!-- /exit-codes -->
 
-Returned errors other than `broken_pipe` produce a schema-1 JSON stderr envelope
-with `error.kind` and `error.message`. Stderr can also contain timing/reader
-diagnostics. A report can be printed to stdout before failure; Rust
+Returned errors, including `broken_pipe`, produce a schema-1 JSON stderr envelope
+where stderr remains writable, with `error.kind` and `error.message`. Common
+refusals add `error.next_command`: structured `argv` (UTF-8 or null) and exact
+native-byte `argv_hex`; this is data, not executable shell text. Suggestions do
+not retry writes. Phase timing JSON is off by default; `OXBLEND_PHASE_TIMING=1`
+enables the interim emitter until T4 diagnostic trace mode replaces it. Timings
+are not stable machine interfaces. Explicit reader diagnostics/warnings remain. A report can be printed to stdout before failure; Rust
 `Ok(report)` can contain `complete:false`. Check completeness and each
 publication/durability field, not only whether JSON parsed or a file exists.
 
@@ -118,8 +123,10 @@ They are different current spellings, not interchangeable aliases.
 The crate root exposes `BlendFile`, `Header`, `Block`, `Error`, `Result`, and
 these modules (`src/lib.rs`): `bat_cli`, `diff`, `edit`,
 `exr_header`, `facts`, `file_ops`, `overrides`, `pack`, `schema`,
-`trace`, `typed_edit`, `typed_spec`, `value`. **Stable in 1.x:** the root types and read-side modules `schema`, `value`,
-`trace`, `pack`, `diff`, `exr_header`, `facts` and `overrides`.
+`summary`, `trace`, `typed_edit`, `typed_spec`, `value`. **Stable in 1.x:** the root types and read-side modules `schema`, `value`,
+`trace`, `pack`, `diff`, `exr_header`, `facts`, `summary` and `overrides`.
+`summary::summarize(&BlendFile)` returns owned schema-1 `serde_json::Value`,
+reusing the supplied reader without reopening it.
 
 **Unstable/internal:** `bat_cli`, `edit`, `typed_edit`, `typed_spec` and `file_ops`. They are public for reuse, but their Rust signatures,
 types and behavior may change in minor releases without a semver guarantee;
@@ -161,7 +168,7 @@ root `BlendFile`, `Header`, `Block`, `Error`, `Result`; schema `Schema`, `Struct
 `IdIdentity`, `OverrideFailure`, `OverrideFailureKind`, `OverrideWarning`,
 `LibraryLink`, `ReferenceHop`, `ReferenceHopKind`, `PointerState`; exr_header
 `ExrHeader`, `Part`, `Attribute`, `Channel`, `Pass`; and the five stable edit
-types named above. `diff` and `facts` return `serde_json::Value`; standard-library
+types named above. `diff`, `facts` and `summary` return `serde_json::Value`; standard-library
 and dependency types retain their own contracts. Private and pub(crate) helper
 types are not external interfaces. Options have defaults/constructors; reader
 and report values come from the parsing/report operations.
@@ -266,6 +273,24 @@ Missing-link counts describe referencing sites/chains, not unique absent IDs.
 ## Additive usability fields
 
 Summary adds `materials`, `meshes`, `images`, `collections` and typed `warnings` arrays. Names retain their saved ID prefixes, as existing Object names do. Missing summary fields are warning-only; unavailable Scene fields are null, and other failure kinds still refuse.
+
+## 1.2 task and delivery fixes
+
+Summary stays numeric schema 1: existing fields retain their types/meaning.
+Every saved Scene element returns in block/element order, with additive
+`frame_start`, `frame_step`, and nested `fps` containing `numerator` (saved
+`frs_sec`), `base` (saved float32 `frs_sec_base` as a JSON number), `effective`
+(float64 numerator/base) and `base_bits_hex` (exact saved float32 bits).
+Missing values are null with typed warnings carrying block/element/field context.
+A zero/nonfinite base warns and makes effective FPS null; nonfinite base is null
+with exact bits retained. No active-Scene choice or evaluated animation is claimed.
+
+Broken-pipe exit 0 was a delivery defect, repaired to exit 2 / `broken_pipe` in
+1.2.0, including text/help/version. Capture producer status before filtering;
+a downstream shell pipeline can still hide it. Published pack/edit effects are
+not undone by output failure. `skill [print]` is a new text command; its embedded
+guide is version-matched. Default phase JSON is removed; interim explicit
+`OXBLEND_PHASE_TIMING=1` diagnostics remain outside stable interfaces.
 
 Trace usages add `resolved_path_hex`, UTF-8-or-null `resolved_path`, and `exists`. The top-level `missing_path_count` counts absent usage sites, not distinct files; `referenced_paths_exist` is true when that count is zero. These are disk observations at JSON serialization time, not an atomic filesystem snapshot: sequence/glob/UDIM existence means a nonempty expansion, not every possible member. Directories count as present. `complete` retains its traversal meaning and does not promise disk availability. Nested trace reports and list full-info usages expose the same fields.
 

@@ -193,7 +193,10 @@ fn diff_returned_errors_still_emit_an_inconclusive_v1_report() {
             report["difference_count"],
             report["differences"].as_array().unwrap().len()
         );
-        assert_eq!(report["errors"][0], error["error"]);
+        // CLI guidance is additive; the stable kind/message must still match
+        // the incomplete report rather than requiring identical object keys.
+        assert_eq!(report["errors"][0]["kind"], error["error"]["kind"]);
+        assert_eq!(report["errors"][0]["message"], error["error"]["message"]);
         if right == "mesh-material-root.blend" {
             assert_eq!(report["errors"][0]["kind"], "missing_field");
         }

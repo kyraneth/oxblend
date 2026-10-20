@@ -1,3 +1,13 @@
+# Oxblend 1.2.0
+
+- Library-owned `summary::summarize(&BlendFile)` reuses one reader; the CLI only renders it.
+- Every saved Scene returns in block/element order, with start/end/step and nested FPS numerator/base/effective plus exact base bits. Existing fields and missing-field warnings remain; numeric schema 1 is extended additively.
+- `oxblend skill` / `oxblend skill print` print the version-matched bundled guide offline. Root and command help point there; the first recipe answers range and FPS with one summary call.
+- Common CLI refusals provide structured next-command arguments, including byte-exact path evidence, without executing anything.
+- **Delivery correction:** broken stdout writes/flushes now exit 2 / `broken_pipe`, not silent success. Capture producer exit before filtering; pack/edit effects are not rolled back.
+- Default stderr phase JSON is removed from reflection, trace and overrides. `OXBLEND_PHASE_TIMING=1` explicitly enables interim timing diagnostics until T4 trace mode replaces them. Reader warnings/explicit controls remain.
+- No new dependencies, write admission, general query/explain or Python binding are introduced.
+
 # Oxblend 1.1.0
 
 - Partial summaries with typed missing-field warnings and material/mesh/image/collection names.

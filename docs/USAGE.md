@@ -1,22 +1,22 @@
 # Oxblend usage
 
-Commands are case-sensitive. `oxblend --help` lists all commands; `oxblend COMMAND --help` lists that command's arguments and flags; `--version` prints the package version. Paths accept native Unix bytes. Flags, integers and JSON field paths must be UTF-8. Retain stdout, stderr and the exit status together.
+Commands are case-sensitive. `oxblend --help` lists all commands; `oxblend COMMAND --help` lists that command's arguments and flags; `--version` prints the package version. Paths accept native Unix bytes. Flags, integers and JSON field paths must be UTF-8. Retain stdout, stderr and the exit status together. `oxblend skill` (or `oxblend skill print`) prints the version-matched bundled guide offline; no checkout or separate docs installation is required.
 
 ## Exit status
 
-- **0:** declared command contract completed (also a clean exit when a downstream pipe closes).
-- **2:** usage/read/write error or incomplete report.
+- **0:** declared command contract completed, including complete stdout delivery.
+- **2:** usage/read/write error, broken pipe or incomplete report.
 - **3:** selected input is missing or not a file for list/blocks/pack.
 - **5:** explicit pack project path does not exist; nothing written.
 - **Signal/other:** external termination or unexpected failure; inspect the destination before retrying.
 
-Hard errors are JSON stderr: `{"schema":1,"error":{"kind":"...","message":"..."}}`. Query timings also use stderr. A command can emit JSON stdout and then exit 2. Library `Ok(report)` can have `complete=false`. With two input arguments, `diff` also emits its v1 incomplete stdout report on returned comparison/read errors; argument-count errors remain stderr-only.
+Hard errors are JSON stderr: `{"schema":1,"error":{"kind":"...","message":"..."}}`. Common refusals add `error.next_command` with structured `argv` (UTF-8 or null) and native-byte `argv_hex`; do not interpolate these arguments into a shell script. Missing/type-mismatched fields and invalid block indices point to `inspect FILE`; usage errors point to command help. Suggestions do not execute anything. Phase JSON is off by default. Set `OXBLEND_PHASE_TIMING=1` for interim stderr timings on summary/reflection/facts, trace and overrides. This opt-in is temporary until T4 diagnostic trace mode replaces it; timings remain outside stable machine interfaces. Existing explicit reader diagnostics/warnings are unchanged. A command can emit JSON stdout and then exit 2. Library `Ok(report)` can have `complete=false`. With two input arguments, `diff` also emits its v1 incomplete stdout report on returned comparison/read errors; argument-count errors remain stderr-only.
 
-## All 18 commands
+## All 19 commands
 
 | Command | Arguments and contract |
 |---|---|
-| `summary` | `FILE`: header, block counts, object/material/mesh/image/collection name arrays and Scene summaries; missing fields produce typed `warnings`, unavailable Scene values are null; names require UTF-8 |
+| `summary` | `FILE`: header, block counts, object/material/mesh/image/collection name arrays and every saved Scene, including frame range/step and FPS; missing fields produce typed `warnings`, unavailable Scene values are null; names require UTF-8 |
 | `inspect` | `FILE`: complete ordered block index and SDNA layout, byte names in hex |
 | `get` | `FILE BLOCK PATH_JSON [ELEMENT] [--raw]`: typed field value; element defaults to 0, char arrays trim at first NUL unless raw |
 | `pointer` | `FILE BLOCK PATH_JSON [ELEMENT]`: explicit checked target block or null |
@@ -34,9 +34,34 @@ Hard errors are JSON stderr: `{"schema":1,"error":{"kind":"...","message":"..."}
 | `pack` | `INPUT NEW_TARGET [-p PROJECT] [PACK_OPTIONS]`: directory or case-insensitive `.zip`; project defaults to input parent |
 | `pack-sequence` | `INPUT... -t NEW_TARGET [-p PROJECT] [PACK_OPTIONS]`: deduplicated multi-root pack, hierarchy by default; inferred common input parent or explicit project |
 | `exr-header` | `FILE`: OpenEXR header/part/channel metadata without pixel decode |
+| `skill` | `[print]`: print the bundled version-matched Markdown guide without network access or writing/installing files |
 
 Unknown flags are errors. `--target` aliases `-t` for pack-sequence; pack requires its positional target. `--project` aliases `-p`; `--` ends pack option parsing.
 `list` SHA/timing with JSON warns and still reports JSON. `--address` accepts decimal or `0x` hexadecimal. All commands accept `--help`/`-h` without an input; help explains arguments, options and defaults.
+
+## Frame range and FPS in one call
+
+```sh
+oxblend summary scene.blend > summary.json 2> summary.stderr
+status=$?
+```
+
+`scenes[]` preserves saved block order and element order within each block. Each
+entry retains `name`, `camera`, `frame_end` and adds `frame_start`, `frame_step`,
+and `fps: {numerator, base, effective, base_bits_hex}`. Numerator is the signed
+saved `Scene.r.frs_sec`, base is `Scene.r.frs_sec_base` converted exactly from
+float32 to a JSON number, and effective is numerator/base computed as float64.
+Range start/end/step are `r.sfra`, `r.efra`, `r.frame_step`. All scenes return;
+none is implicitly active. Missing leaves are null with `missing_field` warnings.
+A zero/nonfinite FPS base produces a `type` warning and null effective FPS;
+nonfinite base is null too. Exact saved base bits remain in `base_bits_hex`.
+This additive extension retains numeric schema 1 and all previous keys/warnings.
+Other malformed/type failures still refuse. No Blender evaluation is implied.
+
+Capture the producer status before filtering saved output. A closed stdout now
+returns exit 2 / `broken_pipe`, including help/version and text commands. Shell
+pipeline status alone may still hide the producer failure without pipefail.
+Published edit/pack effects are not rolled back when stdout delivery fails.
 
 ## Byte-safe queries and edits
 
@@ -113,7 +138,7 @@ A durability failure after publication can leave `output_written:true` and `comp
 
 ## Public Rust API
 
-`BlendFile::{open,from_bytes,header,blocks,schema,payload,get,get_pointer,read_decompressed_bytes}` exposes checked serialized reflection. `from_bytes` takes decoded bytes. `TraceOptions::default()` is recursive/strict; `TraceOptions::new(mode,pointers)` and `OverrideOptions::new(scope,pointers)` provide explicit constructors. `EditOptions::new(durability)` and defaults construct edit options. For `PackOptions`, start from default then set public fields. Public enums and stable options/reports are non-exhaustive; include a fallback arm in external enum matches. The read-side Rust API is stable in 1.x; editing/construction modules and `bat_cli` remain explicitly unstable/internal, except named types reachable from stable signatures; see [STABILITY.md](STABILITY.md) for the exact stability and JSON contracts. Generate exact current signatures with `cargo doc --offline --locked --no-deps`.
+`summary::summarize(&BlendFile) -> Result<serde_json::Value>` owns the same summary as the CLI and reuses an already-open reader without reopening it; the owned report outlives the reader. `BlendFile::{open,from_bytes,header,blocks,schema,payload,get,get_pointer,read_decompressed_bytes}` exposes checked serialized reflection. `from_bytes` takes decoded bytes. `TraceOptions::default()` is recursive/strict; `TraceOptions::new(mode,pointers)` and `OverrideOptions::new(scope,pointers)` provide explicit constructors. `EditOptions::new(durability)` and defaults construct edit options. For `PackOptions`, start from default then set public fields. Public enums and stable options/reports are non-exhaustive; include a fallback arm in external enum matches. The read-side Rust API is stable in 1.x; editing/construction modules and `bat_cli` remain explicitly unstable/internal, except named types reachable from stable signatures; see [STABILITY.md](STABILITY.md) for the exact stability and JSON contracts. Generate exact current signatures with `cargo doc --offline --locked --no-deps`.
 
 ```rust
 let mut options = oxblend::pack::PackOptions::default();

@@ -2,7 +2,6 @@
 use oxblend::value::{PathStep, Value, hex};
 use oxblend::{BlendFile, Error, Result};
 use serde_json::{Value as Json, json};
-use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io::Write;
 
@@ -17,9 +16,35 @@ fn output_error(error: std::io::Error) -> Error {
     )
 }
 macro_rules! println {
-    ($($arg:tt)*) => { writeln!(std::io::stdout().lock(), $($arg)*).map_err(output_error)? };
+    ($($arg:tt)*) => {{
+        let mut out = std::io::stdout().lock();
+        writeln!(out, $($arg)*).map_err(output_error)?;
+        out.flush().map_err(output_error)?;
+    }};
 }
-const USAGE: &str = "oxblend COMMAND [OPTIONS]\nCommands: summary inspect get pointer payload source-facts library-facts trace list blocks overrides diff edit rewrite pack pack-sequence exr-header pointer-census\nUse oxblend COMMAND --help for arguments; docs/USAGE.md for contracts.";
+const SKILL: &str = include_str!("../skills/oxblend/SKILL.md");
+const COMMANDS: &[&str] = &[
+    "summary",
+    "inspect",
+    "get",
+    "pointer",
+    "payload",
+    "source-facts",
+    "library-facts",
+    "trace",
+    "list",
+    "blocks",
+    "overrides",
+    "diff",
+    "edit",
+    "rewrite",
+    "pack",
+    "pack-sequence",
+    "exr-header",
+    "pointer-census",
+    "skill",
+];
+const USAGE: &str = "oxblend COMMAND [OPTIONS]\nFrame range + FPS for every saved Scene: oxblend summary FILE\nBundled offline workflows: oxblend skill\nUse oxblend --help to list commands, oxblend COMMAND --help for arguments; oxblend skill for workflows and contracts.\nInterim phase diagnostics: OXBLEND_PHASE_TIMING=1 (off by default).";
 
 fn argument(v: &OsStr) -> Result<&str> {
     v.to_str().ok_or_else(|| {
@@ -141,107 +166,6 @@ fn rewrite_spec(value: &Json) -> Result<Vec<oxblend::edit::PathRewrite>> {
         })
         .collect()
 }
-fn text(file: &BlendFile, block: usize, names: &[&str]) -> Result<String> {
-    let steps: Vec<_> = names
-        .iter()
-        .map(|s| PathStep::Field(s.as_bytes().to_vec()))
-        .collect();
-    Ok(file.get(block, 0, &steps, true)?.utf8()?.to_owned())
-}
-#[cfg(test)]
-#[path = "main_tests.rs"]
-mod main_tests;
-
-fn id_name(file: &BlendFile, block: usize) -> Result<String> {
-    let si = file.struct_index(block)?;
-    if file.schema().types[file.schema().structs[si].type_index] == b"ID" {
-        text(file, block, &["name"])
-    } else {
-        text(file, block, &["id", "name"])
-    }
-}
-fn summary(file: &BlendFile) -> Result<Json> {
-    let mut codes = BTreeMap::<String, usize>::new();
-    let mut objects = Vec::new();
-    let mut materials = Vec::new();
-    let mut meshes = Vec::new();
-    let mut images = Vec::new();
-    let mut collections = Vec::new();
-    let mut warnings = Vec::new();
-    let mut scenes = Vec::new();
-    fn partial<T>(
-        result: Result<T>,
-        warnings: &mut Vec<Json>,
-        block: usize,
-        field: &str,
-    ) -> Result<Option<T>> {
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(error) if error.kind == "missing_field" => {
-                warnings.push(json!({"kind":"missing_field", "block_index":block, "field":field,
-                    "message":format!("summary block {block}, field {field} unavailable: {}", error.message)}));
-                Ok(None)
-            }
-            Err(error) => Err(error),
-        }
-    }
-    for (index, block) in file.blocks().iter().enumerate() {
-        let code = block.code.split(|&b| b == 0).next().unwrap_or(&[]);
-        let code =
-            std::str::from_utf8(code).map_err(|_| Error::new("encoding", "block code UTF-8"))?;
-        *codes.entry(code.to_owned()).or_default() += 1;
-        let names = match code {
-            "OB" => Some(&mut objects),
-            "MA" => Some(&mut materials),
-            "ME" => Some(&mut meshes),
-            "IM" => Some(&mut images),
-            "GR" => Some(&mut collections),
-            _ => None,
-        };
-        if let Some(names) = names
-            && let Some(name) = partial(id_name(file, index), &mut warnings, index, "id.name")?
-        {
-            names.push(name);
-        }
-        if code == "SC" {
-            let frame = match partial(
-                file.get(
-                    index,
-                    0,
-                    &[
-                        PathStep::Field(b"r".to_vec()),
-                        PathStep::Field(b"efra".to_vec()),
-                    ],
-                    true,
-                ),
-                &mut warnings,
-                index,
-                "r.efra",
-            )? {
-                Some(Value::Signed(v)) => Some(v),
-                None => None,
-                _ => return Err(Error::new("type", "frame end not signed integer")),
-            };
-            let camera = partial(
-                file.get_pointer(index, 0, &[PathStep::Field(b"camera".to_vec())])
-                    .and_then(|target| target.map(|target| id_name(file, target)).transpose()),
-                &mut warnings,
-                index,
-                "camera.id.name",
-            )?
-            .flatten();
-            let name = partial(id_name(file, index), &mut warnings, index, "id.name")?;
-            scenes.push(json!({"name":name, "frame_end":frame, "camera":camera}));
-        }
-    }
-    let header = file.header();
-    Ok(
-        json!({"schema":1, "header":{"version":header.version, "pointer_size":header.pointer_size,
-        "little_endian":header.little_endian, "file_format":header.file_format},
-        "block_codes":codes, "objects":objects, "scenes":scenes, "materials":materials,
-        "meshes":meshes, "images":images, "collections":collections, "warnings":warnings}),
-    )
-}
 fn signature(path: &std::path::Path) -> Result<Json> {
     let metadata = path.metadata().map_err(output_error)?;
     let modified = metadata
@@ -262,12 +186,14 @@ fn durability(value: &OsString) -> Result<oxblend::edit::Durability> {
 fn run(args: &[OsString]) -> Result<()> {
     let command = args.get(1).ok_or_else(|| Error::new("usage", USAGE))?;
     let command = argument(command)?;
+    let phase_timing = std::env::var_os("OXBLEND_PHASE_TIMING").is_some_and(|v| v == "1");
     if command == "--help" || command == "-h" {
-        println!("{USAGE}");
+        println!("{USAGE}\nCommands: {}", COMMANDS.join(" "));
         return Ok(());
     }
     if args.len() == 3 && matches!(args[2].to_str(), Some("--help" | "-h")) {
         let arguments = match command {
+            "skill" => "[print]",
             "summary" | "inspect" | "source-facts" | "library-facts" | "exr-header" => "FILE",
             "get" => "FILE BLOCK PATH_JSON [ELEMENT] [--raw]",
             "pointer" => "FILE BLOCK PATH_JSON [ELEMENT]",
@@ -289,15 +215,18 @@ fn run(args: &[OsString]) -> Result<()> {
                     "INPUT... -t NEW_TARGET"
                 };
                 println!(
-                    "oxblend {command} {inputs} [-p PROJECT] [--exclude GLOB...] [--noop|--dry-run|-n] [--relative-only] [--compress] [--keep-hierarchy] [--durability none|end|each-file]\nINPUT: read-only root blend(s). NEW_TARGET: fresh directory or .zip; never merged/overwritten.\n-t, --target NEW_TARGET: required for pack-sequence; pack requires positional target.\n-p, --project PROJECT: existing directory containing roots; defaults to input parent (common parent for sequence).\n-e, --exclude GLOB...: repeatable resolved-path exclusions, component-wise/right-anchored.\n--noop, --dry-run, -n: plan only; write nothing.\n-r, --relative-only: leave absolute references uncopied/unmodified.\n-c, --compress: seekable zstd blend output; incompatible with ZIP. Short -nrc switches can be combined.\n--keep-hierarchy: preserve hierarchy; default for pack-sequence.\n--durability none|end|each-file: no sync (default), filesystem syncfs, or per-file/parent fsync.\n-- ends option parsing. Missing members can publish available files but exit 2; inspect JSON and pack-info.txt.\n-h, --help: show this help."
+                    "oxblend {command} {inputs} [-p PROJECT] [--exclude GLOB...] [--noop|--dry-run|-n] [--relative-only] [--compress] [--keep-hierarchy] [--durability none|end|each-file]\nINPUT: read-only root blend(s). NEW_TARGET: fresh directory or .zip; never merged/overwritten.\n-t, --target NEW_TARGET: required for pack-sequence; pack requires positional target.\n-p, --project PROJECT: existing directory containing roots; defaults to input parent (common parent for sequence).\n-e, --exclude GLOB...: repeatable resolved-path exclusions, component-wise/right-anchored.\n--noop, --dry-run, -n: plan only; write nothing.\n-r, --relative-only: leave absolute references uncopied/unmodified.\n-c, --compress: seekable zstd blend output; incompatible with ZIP. Short -nrc switches can be combined.\n--keep-hierarchy: preserve hierarchy; default for pack-sequence.\n--durability none|end|each-file: no sync (default), filesystem syncfs, or per-file/parent fsync.\n-- ends option parsing. Missing members can publish available files but exit 2; inspect JSON and pack-info.txt.\n-h, --help: show this help.\nRun oxblend skill for bundled workflows and contracts."
                 );
                 return Ok(());
             }
             _ => return Err(Error::new("usage", USAGE)),
         };
         let details = match command {
+            "skill" => {
+                "Print the version-matched, bundled Markdown guide. No checkout, network or installation of guidance files required."
+            }
             "summary" => {
-                "FILE: read-only blend. Print header, block counts, Scene details and object/material/mesh/image/collection names. Missing fields become typed warnings/null; inspect warnings before judging an empty scene."
+                "FILE: read-only blend. Print header, block counts, every saved Scene (name, camera, frame_start/end/step, fps numerator/base/effective) and object/material/mesh/image/collection names. Missing fields become typed warnings/null; inspect warnings before judging an empty scene."
             }
             "inspect" => {
                 "FILE: read-only blend. Print every block in physical order and the complete source SDNA. Indices apply only to this exact file/save; byte names are hex."
@@ -344,12 +273,22 @@ fn run(args: &[OsString]) -> Result<()> {
             _ => unreachable!(),
         };
         println!(
-            "oxblend {command} {arguments}\n{details}\n-h, --help: show this help.\nSee docs/USAGE.md for report contracts and specifications."
+            "oxblend {command} {arguments}\n{details}\n-h, --help: show this help.\nRun oxblend skill for bundled workflows and contracts."
         );
         return Ok(());
     }
     if command == "--version" || command == "-V" {
         println!("oxblend {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if command == "skill" {
+        if args.len() != 2 && !(args.len() == 3 && args[2] == "print") {
+            return Err(Error::new("usage", "skill [print]"));
+        }
+        let mut out = std::io::stdout().lock();
+        out.write_all(SKILL.as_bytes())
+            .and_then(|_| out.flush())
+            .map_err(output_error)?;
         return Ok(());
     }
     if command == "diff" {
@@ -573,7 +512,9 @@ fn run(args: &[OsString]) -> Result<()> {
             .and_then(|_| out.write_all(b"\n"))
             .and_then(|_| out.flush())
             .map_err(output_error)?;
-        writeln!(std::io::stderr().lock(), "{}", json!({"overrides_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(|e|Error::new("io",e.to_string()))?;
+        if phase_timing {
+            writeln!(std::io::stderr().lock(), "{}", json!({"overrides_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(output_error)?;
+        }
         if !report.complete {
             return Err(Error::new(
                 "incomplete_overrides",
@@ -630,7 +571,9 @@ fn run(args: &[OsString]) -> Result<()> {
             .and_then(|_| out.write_all(b"\n"))
             .and_then(|_| out.flush())
             .map_err(output_error)?;
-        writeln!(std::io::stderr().lock(),"{}",json!({"trace_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(|e|Error::new("io",e.to_string()))?;
+        if phase_timing {
+            writeln!(std::io::stderr().lock(),"{}",json!({"trace_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(output_error)?;
+        }
         if !report.complete {
             return Err(Error::new(
                 "incomplete_trace",
@@ -678,7 +621,7 @@ fn run(args: &[OsString]) -> Result<()> {
     )?;
     let opened = start.elapsed().as_secs_f64();
     let output = match command {
-        "summary" => summary(&file)?,
+        "summary" => oxblend::summary::summarize(&file)?,
         "library-facts" | "source-facts" => {
             let facts = if command == "source-facts" {
                 oxblend::facts::source_facts(&file)
@@ -737,19 +680,51 @@ fn run(args: &[OsString]) -> Result<()> {
         .and_then(|_| out.write_all(b"\n"))
         .and_then(|_| out.flush())
         .map_err(output_error)?;
-    let phases = json!({"open_index_seconds":opened, "query_seconds":query, "serialize_write_seconds":serialization.elapsed().as_secs_f64()});
-    writeln!(std::io::stderr().lock(), "{phases}").map_err(output_error)?;
+    if phase_timing {
+        let phases = json!({"open_index_seconds":opened, "query_seconds":query, "serialize_write_seconds":serialization.elapsed().as_secs_f64()});
+        writeln!(std::io::stderr().lock(), "{phases}").map_err(output_error)?;
+    }
     Ok(())
 }
-fn main() {
-    if let Err(error) = run(&std::env::args_os().collect::<Vec<_>>()) {
-        if error.kind == "broken_pipe" {
-            return;
+// Structured argv are data, never an interpolated shell command. Native-byte
+// paths remain exact in argv_hex even when their text representation is null.
+fn next_command(error: &Error, args: &[OsString]) -> Option<Json> {
+    let command = args.get(1).and_then(|v| v.to_str()).unwrap_or("");
+    let mut next: Vec<OsString> = vec!["oxblend".into()];
+    match error.kind {
+        "usage" | "path" => {
+            if COMMANDS.contains(&command) {
+                next.push(command.into());
+            }
+            next.push("--help".into());
         }
+        "missing_field" | "unsupported_type" | "type" | "bounds" | "pointer_target_type" => {
+            let file = args.get(2)?;
+            next.push(
+                if matches!(command, "source-facts" | "library-facts") {
+                    "trace"
+                } else {
+                    "inspect"
+                }
+                .into(),
+            );
+            next.push(file.clone());
+        }
+        "pointer_path" => next.extend(["pointer".into(), "--help".into()]),
+        _ => return None,
+    }
+    Some(
+        json!({"argv":next.iter().map(|v| v.to_str()).collect::<Vec<_>>(),
+        "argv_hex":next.iter().map(|v| hex(v.as_encoded_bytes())).collect::<Vec<_>>()}),
+    )
+}
+fn main() {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    if let Err(error) = run(&args) {
         let _ = writeln!(
             std::io::stderr().lock(),
             "{}",
-            json!({"schema":1,"error":{"kind":error.kind,"message":error.message}})
+            json!({"schema":1,"error":{"kind":error.kind,"message":error.message,"next_command":next_command(&error, &args)}})
         );
         std::process::exit(if error.kind == "pack_project" {
             5

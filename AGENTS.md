@@ -4,11 +4,12 @@ Oxblend is a Rust library and CLI for reading and safely operating on serialized
 
 ## Use the CLI
 
-Retain **stdout, stderr AND the exit code**. Treat valid JSON as data, not proof of success. Check `complete`, errors, warnings, publication and durability fields. Exit codes: **0:** declared command contract completed (also a clean exit when a downstream pipe closes); **2:** usage/read/write error or incomplete report; **3:** selected input is missing or not a file for list/blocks/pack; **5:** explicit pack project path does not exist; nothing written. **Signal/other:** external termination or unexpected failure; inspect the destination before retrying.
+Retain **stdout, stderr AND the exit code**. Treat valid JSON as data, not proof of success. Check `complete`, errors, warnings, publication and durability fields. Exit codes: **0:** declared command contract completed (including complete stdout write/flush); **2:** usage/read/write error, broken pipe or incomplete report; **3:** selected input is missing or not a file for list/blocks/pack; **5:** explicit pack project path does not exist; nothing written. **Signal/other:** external termination or unexpected failure; inspect the destination before retrying.
 
 Keep inputs read-only. Use new output names; never overwrite inputs or merge a partial pack. A pack may publish available members and still exit 2. Inspect the report before using its output.
 
-- `summary`: read the header and scene/object overview.
+- `summary`: read the header and every saved Scene, including frame start/end/step and FPS numerator/base/effective, in one call.
+- `skill`: print the bundled version-matched guide offline.
 - `inspect`: inspect ordered blocks and the file's own SDNA.
 - `get`: read a typed field by block and explicit field path.
 - `pointer`: resolve a checked pointer target explicitly.
@@ -27,7 +28,7 @@ Keep inputs read-only. Use new output names; never overwrite inputs or merge a p
 - `exr-header`: inspect EXR metadata without decoding pixels.
 - `pointer-census`: inspect whole-file pointer states, not semantic reconstruction.
 
-Read [docs/USAGE.md](docs/USAGE.md) for exact arguments and JSON inputs, [docs/STABILITY.md](docs/STABILITY.md) for contracts, and [skills/oxblend/SKILL.md](skills/oxblend/SKILL.md) for agent workflows. Use `oxblend --help` before constructing a command. Never reuse physical block indices from another file or save.
+Read [docs/USAGE.md](docs/USAGE.md) for exact arguments and JSON inputs, [docs/STABILITY.md](docs/STABILITY.md) for contracts, and [skills/oxblend/SKILL.md](skills/oxblend/SKILL.md) for agent workflows. Use `oxblend skill` for bundled task recipes and `oxblend COMMAND --help` for syntax. Never reuse physical block indices from another file or save.
 
 ## Contribute
 
