@@ -66,7 +66,11 @@ impl PackInputs {
             value.check(path)?;
             return Ok(value.clone());
         }
-        let started = crate::phase::Start::new();
+        let mut span = crate::diagnostics::Span::new(
+            "snapshot",
+            serde_json::json!({"path":path.to_string_lossy()}),
+        );
+        let result = (|| {
         let Input::Opaque(raw) = self.take(path, true)? else {
             unreachable!()
         };
@@ -114,19 +118,13 @@ impl PackInputs {
             proof,
         });
         snapshot.check(path)?;
-        if std::env::var_os("OXBLEND_PHASES").is_some() {
-            eprintln!(
-                "OXBLEND_PHASE snapshot {:.9} {} {}",
-                started.elapsed().as_secs_f64(),
-                snapshot.reader.decompressed_len(),
-                crate::value::hex(path.as_os_str().as_encoded_bytes())
-            );
-        }
-        started.log_rx("snapshot");
+        span.data(serde_json::json!({"decoded_bytes":snapshot.reader.decompressed_len(),"blocks":snapshot.reader.blocks().len()}));
         self.files
             .borrow_mut()
             .insert(path.to_path_buf(), Input::Parsed(snapshot.clone()));
         Ok(snapshot)
+        })().map_err(|e| crate::edit_output::context(e, "snapshot/index", path));
+        span.result(result)
     }
     pub fn copy_physical(
         &self,
@@ -551,12 +549,10 @@ impl Backing {
         }
     }
     pub fn report(&self, path: &Path) {
-        if std::env::var_os("OXBLEND_READ_REPORT").is_some() {
-            eprintln!(
-                "OXBLEND_READ {}",
-                serde_json::json!({"path_hex":crate::value::hex(path.as_os_str().as_encoded_bytes()), "source":self.stats()})
-            );
-        }
+        crate::diagnostics::point(
+            "reader.stats",
+            serde_json::json!({"path":path.to_string_lossy(),"source":self.stats()}),
+        );
     }
     pub fn stats(&self) -> serde_json::Value {
         match self {

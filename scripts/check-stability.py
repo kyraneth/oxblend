@@ -154,8 +154,10 @@ def check(root):
     # complete handler prefix, so any early-return bypass fails this inventory.
     start = next(i for i in range(len(main)) if main[i:i+4] == ["fn", "main", "(", ")"])
     joined = " ".join(main[start:])
-    prefix = 'fn main ( ) { let args = std : : env : : args_os ( ) . collect : : < Vec < _ > > ( ) ; if let Err ( error ) = run ( & args ) { let _ = writeln !'
-    if not joined.startswith(prefix):
+    prefix = 'fn main ( ) { let args = std : : env : : args_os ( ) . collect : : < Vec < _ > > ( ) ;'
+    if (not joined.startswith(prefix) or 'return' in main[start:]
+            or 'let result = span . result ( run ( & args ) ) ;' not in joined
+            or 'if let Err ( error ) = result { let _ = writeln !' not in joined):
         raise ValueError("error handler bypass/shape changed")
     rows = table(doc, 'exit-codes')
     declared = {r[0][0]: r[1] for r in rows}

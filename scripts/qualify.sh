@@ -48,6 +48,9 @@ run licence scripts/licence-gate.sh || exit $?
 run network scripts/no-network-check.sh || exit $?
 # The stability tables are inventories of the current source, not a second spec.
 run stability python3 scripts/check-stability.py || exit $?
+if [[ -n ${FLATTRACE_CHECKOUT:-} ]]; then
+    run flattrace python3 scripts/check-flattrace.py || exit $?
+fi
 if (( armed )); then
     : "${OXBLEND_QUALIFY_EXTRA:?armed qualification requires explicit additional-gates entry point}"
     run additional "$OXBLEND_QUALIFY_EXTRA" "$logs" || exit $?

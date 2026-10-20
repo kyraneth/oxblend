@@ -3,7 +3,7 @@ name: oxblend
 description: "Inspects saved Blender files and their dependencies with Oxblend. Use when summarizing a .blend, finding missing files, packing for a render farm, comparing versions, repathing an image or reading EXR header values without starting Blender."
 ---
 
-# Oxblend 1.2.0
+# Oxblend 1.3.0
 
 Copyright (c) 2026 Mario Hawat. CC BY 4.0:
 https://creativecommons.org/licenses/by/4.0/ . Software is MIT.
@@ -15,6 +15,7 @@ This version-matched guide is bundled in the executable: `oxblend skill`
 oxblend summary scene.blend > summary.json 2> summary.stderr
 status=$? # Retain this producer exit before reading/filtering summary.json.
 ```
+Reuse a saved report when the input is unchanged; follow-up questions need no reopen.
 Read **every** `scenes[]` entry, in saved block/element order: `name`, `camera`,
 `frame_start`, `frame_end`, `frame_step` and `fps.{numerator,base,effective}`.
 `numerator` is saved `RenderData.frs_sec`; `base` is `frs_sec_base` decoded from
@@ -51,8 +52,8 @@ run() {
 run version --version
 ```
 All commands have `COMMAND --help`; `oxblend skill` prints this guide offline.
-Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.2.0/docs/USAGE.md)
-and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.2.0/docs/STABILITY.md).
+Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.3.0/docs/USAGE.md)
+and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.3.0/docs/STABILITY.md).
 These links are not installed files. Examples below use `run`; substitute actual inputs.
 Capture the producer before filtering: a closed stdout now exits 2 with
 `broken_pipe`, not success. Pipelines can hide that producer status unless the
@@ -84,15 +85,38 @@ are `value.hex`. Indices/addresses are local to this exact save, not persistent 
 run dependencies trace scene.blend
 run existing list scene.blend --json
 ```
-Use `trace` as the reference inventory; `list` is an expanded existing-file view.
+Start here, not with `inspect`/`library-facts`. Use `trace` as the declared
+reference inventory; `list` is an expanded existing-file view. After retaining
+both exits, extract saved reports with **python3**, not an assumed `python`:
+```sh
+python3 - <<'PY'
+import json
+t = json.load(open("dependencies.stdout"))
+print("traversal", t["complete"], "missing sites", t["missing_path_count"])
+for u in t["usages"]:
+    print(u["resolved_path"] or "hex:" + u["resolved_path_hex"], u["exists"])
+# Values are member arrays; keys identify owning blend files.
+if int(open("existing.exit").read()) == 0:
+    f = json.load(open("existing.stdout"))
+    members = sorted({p for paths in f.values() for p in paths})
+    print("expanded members", len(members), *members, sep="\n")
+else:
+    print("list refused: use trace's declared references and errors above")
+PY
+```
+List paths tagged `bytes-hex:` encode native bytes; `utf8:` escapes literal
+tag-prefixed names. Normalize these before comparing sets. Include the selected
+root explicitly in a complete package inventory; it need not appear in the map.
 Trace defaults to recursive/strict. Read errors and warnings even on exit 0.
 `complete` means traversal completed. Separately inspect each usage's `exists`,
 `resolved_path`, and top-level `missing_path_count` / `referenced_paths_exist`.
 The count is missing usage sites, not distinct files. `//` resolves relative to the
 owning .blend's directory, including inside libraries, not the root or shell cwd.
 Use resolved paths (or decode their hex) to stat again when availability matters.
-Existence is a non-atomic observation: glob/UDIM/sequence success needs only one
-expanded file; directories count as present. Check required frames separately.
+Existence is non-atomic: glob/UDIM/sequence success needs only one expanded
+file; directories count as present. UDIM members are spatial **tiles**, not
+animation frames. Tile expansion proves no animation-sequence coverage; check
+required tiles and frames separately.
 Unused saved linked stubs are conservatively traced/packed, not proven render needs.
 Missing assets/libraries make `list` exit 2 with a typed stderr error and no listing;
 missing IDs/incomplete traversal also refuse. Use trace for full missing details.
@@ -123,6 +147,12 @@ are virtual. `output_written`/`archive_written` do not imply completeness or cra
 persistence; durability defaults to `none`. Inspect destinations before retrying.
 Even a complete pack covers the selected serialized closure, not render validation;
 review unrelocated-path warnings and reopen/test in compatible Blender before use.
+For native verification, isolate the package from original sources and traverse
+known dependency-bearing channels with version-correct Blender APIs, not every
+RNA property. Weak historical import/append sources and runtime-added bundled
+brush libraries are **not project dependencies**; classify them separately.
+Keep external Text declarations and report totals from the normalized final set.
+Native reopen alone is not render/evaluation proof.
 
 ## Compare two versions
 ```sh
@@ -221,10 +251,10 @@ The latter contains structured `argv` (UTF-8 or null) and exact native-byte
 `argv_hex`; treat them as arguments, not a shell script. Usage errors point to
 command help; field/type/index refusals point to `inspect FILE` (fact-closure
 refusals to `trace FILE`). Suggestions never execute automatically.
-Phase timing JSON is off by default. `OXBLEND_PHASE_TIMING=1 oxblend summary FILE`
-opts into interim stderr timings (also trace/overrides/reflection commands),
-until the planned T4 diagnostic trace mode replaces them. These timings are not
-a stable interface. Other reader warnings/explicit diagnostic controls remain.
+Set `FLATTRACE_DIR` to retain local flattrace v1 diagnostics; unset/empty is off.
+`FLATTRACE_TRACEPARENT` joins an enclosing span. Sink failure warns once without
+changing the command result. Killed runs stay unfinished. Old phase/read-report
+variables are removed. Export and review traces before sharing: they contain paths.
 Preserve unknown kinds/added report fields; edit specs reject unknown keys.
 Report reproducible bugs to the repository's [GitHub issues](https://github.com/kyraneth/oxblend/issues)
 with safe inputs, version, argv, stdout/stderr, exit and completeness/publication

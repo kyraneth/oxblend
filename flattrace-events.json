@@ -1,0 +1,372 @@
+{
+  "tool": "oxblend",
+  "events": {
+    "run": {
+      "kind": "span",
+      "fields": {
+        "command": "command ID (unitless)",
+        "argv": "argument strings; never credentials",
+        "host": "hostname",
+        "version": "tool version",
+        "task": "optional task ID (unitless)",
+        "variant": "optional configuration ID (unitless)",
+        "pid": "process ID (unitless)",
+        "env": "optional known environment/build facts (SPEC vocabulary)",
+        "episode": "optional stable episode/attempt identity (unitless)",
+        "attempt": "optional intentional repeat ordinal (unitless)",
+        "seed": "optional integer/string RNG seed; null if unknown",
+        "task_hash": "optional algorithm-prefixed task-definition digest",
+        "config_hash": "optional algorithm-prefixed configuration digest"
+      }
+    },
+    "file.open": {
+      "kind": "span",
+      "fields": {
+        "path": "lossy UTF-8 filesystem path",
+        "size_bytes": "physical size (bytes), when known",
+        "decoded_bytes": "decoded capture length in bytes when known",
+        "blend": "decode blend capture rather than opaque physical asset (boolean)"
+      }
+    },
+    "index": {
+      "kind": "span",
+      "fields": {
+        "blocks": "indexed block count (count)",
+        "types": "SDNA type count (count)",
+        "decoded_bytes": "decoded extent in bytes"
+      }
+    },
+    "write": {
+      "kind": "span",
+      "fields": {
+        "path": "output/staging path",
+        "bytes": "completed stage bytes; unknown on abandoned write"
+      }
+    },
+    "publish": {
+      "kind": "span",
+      "fields": {
+        "path": "destination path",
+        "output_written": "publication observed (boolean)",
+        "archive_written": "ZIP publication observed (boolean, when applicable)",
+        "durability_completed": "requested sync completed (boolean)"
+      }
+    },
+    "summary": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "inspect": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "get": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "pointer": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "payload": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "source-facts": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "library-facts": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "trace": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "list": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "blocks": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "overrides": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "pointer-census": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "pack": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "pack-sequence": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "diff": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "edit": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "rewrite": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "exr-header": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "skill": {
+      "kind": "span",
+      "fields": {}
+    },
+    "help": {
+      "kind": "span",
+      "fields": {}
+    },
+    "version": {
+      "kind": "span",
+      "fields": {}
+    },
+    "schema": {
+      "kind": "span",
+      "fields": {
+        "bytes": "SDNA payload bytes"
+      }
+    },
+    "serialize": {
+      "kind": "span",
+      "fields": {}
+    },
+    "pack.operation": {
+      "kind": "span",
+      "fields": {
+        "path": "pack destination path",
+        "roots": "selected input count",
+        "dry_run": "no writes requested (boolean)",
+        "planning_complete": "trusted plan (boolean)",
+        "complete": "selected closure complete (boolean)",
+        "missing": "missing usage count",
+        "files": "planned member count",
+        "archive_written": "ZIP publication observed (boolean)",
+        "published_files": "published member count"
+      }
+    },
+    "pack.plan": {
+      "kind": "span",
+      "fields": {}
+    },
+    "pack.execute": {
+      "kind": "span",
+      "fields": {}
+    },
+    "pack.copy": {
+      "kind": "span",
+      "fields": {
+        "input": "source path",
+        "output": "destination path",
+        "output_written": "publication observed (boolean)",
+        "durability_completed": "sync observed (boolean)"
+      }
+    },
+    "pack.repath": {
+      "kind": "span",
+      "fields": {
+        "input": "source path",
+        "output": "destination path",
+        "output_written": "publication observed (boolean)",
+        "durability_completed": "sync observed (boolean)"
+      }
+    },
+    "fetch": {
+      "kind": "span",
+      "fields": {
+        "path": "source path",
+        "blend": "decode blend capture (boolean)"
+      }
+    },
+    "snapshot": {
+      "kind": "span",
+      "fields": {
+        "path": "source path",
+        "decoded_bytes": "decoded bytes",
+        "blocks": "indexed blocks (count)"
+      }
+    },
+    "invalid": {
+      "kind": "span",
+      "fields": {}
+    },
+    "fetch.budget": {
+      "kind": "point",
+      "fields": {
+        "limit": "RLIMIT_NOFILE (FD slots)",
+        "occupied": "observed occupied FD slots (count)",
+        "publication_fds": "live publication descriptors (count)",
+        "worker_fds": "descriptors per lane (count)",
+        "lanes": "fetch lanes (count)",
+        "source": "proc or fcntl"
+      }
+    },
+    "reader.stats": {
+      "kind": "point",
+      "fields": {
+        "path": "source path",
+        "source": "mode and read/decode/spill/frame counters; byte fields in bytes, frame fields in counts"
+      }
+    },
+    "copy.stats": {
+      "kind": "point",
+      "fields": {
+        "path": "source path",
+        "bytes": "physical bytes copied",
+        "mechanism": "copy_file_range or streamed",
+        "fallback_errno": "Linux errno or null",
+        "fallback_reason": "errno, zero_return or null"
+      }
+    },
+    "query.stats": {
+      "kind": "point",
+      "fields": {
+        "elapsed_ms": "query residence milliseconds",
+        "open_index_ms": "open/index residence milliseconds",
+        "query_ms": "post-open query residence milliseconds",
+        "complete": "traversal complete (boolean)"
+      }
+    }
+  },
+  "commands": {
+    "summary": [
+      "run",
+      "summary"
+    ],
+    "inspect": [
+      "run",
+      "inspect"
+    ],
+    "get": [
+      "run",
+      "get"
+    ],
+    "pointer": [
+      "run",
+      "pointer"
+    ],
+    "payload": [
+      "run",
+      "payload"
+    ],
+    "source-facts": [
+      "run",
+      "source-facts"
+    ],
+    "library-facts": [
+      "run",
+      "library-facts"
+    ],
+    "trace": [
+      "run",
+      "trace"
+    ],
+    "list": [
+      "run",
+      "list"
+    ],
+    "blocks": [
+      "run",
+      "blocks"
+    ],
+    "overrides": [
+      "run",
+      "overrides"
+    ],
+    "pointer-census": [
+      "run",
+      "pointer-census"
+    ],
+    "pack": [
+      "run",
+      "pack"
+    ],
+    "pack-sequence": [
+      "run",
+      "pack-sequence"
+    ],
+    "diff": [
+      "run",
+      "diff"
+    ],
+    "edit": [
+      "run",
+      "edit"
+    ],
+    "rewrite": [
+      "run",
+      "rewrite"
+    ],
+    "exr-header": [
+      "run",
+      "exr-header"
+    ],
+    "skill": [
+      "run",
+      "skill"
+    ],
+    "help": [
+      "run",
+      "help"
+    ],
+    "version": [
+      "run",
+      "version"
+    ],
+    "invalid": [
+      "run",
+      "invalid"
+    ]
+  }
+}

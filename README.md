@@ -6,7 +6,10 @@ Read, trace, pack and safely edit Blender `.blend` files without Blender.
 
 A fast Rust library and command-line tool. It tells you what a `.blend` file contains and what it depends on, packs it with its dependencies, and makes guarded edits, all without opening Blender. When it can't be sure, it refuses and says why instead of guessing.
 
-Linux x86_64 · version 1.2.0
+Linux x86_64 · version 1.3.0
+
+Offline diagnostics: `FLATTRACE_DIR=/path/to/traces oxblend summary scene.blend`.
+Unset/empty is off; no upload. See [local tracing](docs/USAGE.md#local-flattrace-diagnostics).
 
 ## Install (Linux x86_64)
 

@@ -718,7 +718,7 @@ fn blocks(input: &Path, args: &[OsString]) -> Result<()> {
     Ok(())
 }
 
-fn hash_file(path: &Path) -> Result<(String, f64)> {
+pub(crate) fn hash_file(path: &Path) -> Result<(String, f64)> {
     use std::io::Read;
     let start = std::time::Instant::now();
     use std::os::unix::fs::MetadataExt;

@@ -3,6 +3,8 @@
 /// Unstable/internal Rust API: may change in minor releases. CLI/JSON contracts are separate.
 pub mod bat_cli;
 mod checked;
+/// Unstable local diagnostic adapter; flattrace owns the format.
+pub mod diagnostics;
 pub mod diff;
 /// Unstable/internal operations: may change in minor releases; CLI/JSON contracts are separate.
 /// Exceptions stable in 1.x: EditOptions, EditReport, EditRange, EditFailure and Durability,
@@ -27,7 +29,6 @@ pub mod overrides;
 mod owner_compat_tests;
 pub mod pack;
 mod pack_zip;
-mod phase;
 mod physical;
 pub mod schema;
 mod seek_input;
@@ -164,136 +165,151 @@ fn count(raw: u64, width: usize) -> Result<usize> {
 }
 impl BlendFile {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_backing(Backing::open(path.as_ref())?)
+        let path = path.as_ref();
+        crate::diagnostics::opened(path, || Self::from_backing(Backing::open(path)?))
     }
     /// Blocks inspection has an invocation-scoped streaming/frame reader;
     /// ordinary trace/list and kept-closure admission policies stay unchanged.
     pub(crate) fn open_blocks(path: &Path) -> Result<Self> {
-        let reader = Self::from_backing(Backing::Trace(Box::new(
-            crate::trace_input::Input::open_blocks(path)?,
-        )))?;
-        reader.check_source()?;
-        Ok(reader)
+        crate::diagnostics::opened(path, || {
+            let reader = Self::from_backing(Backing::Trace(Box::new(
+                crate::trace_input::Input::open_blocks(path)?,
+            )))?;
+            reader.check_source()?;
+            Ok(reader)
+        })
     }
     pub(crate) fn open_trace(path: &Path) -> Result<Self> {
-        let reader = Self::from_backing(Backing::Trace(Box::new(
-            crate::trace_input::Input::open_native(path)?,
-        )))?;
-        reader.check_source()?;
-        Ok(reader)
+        crate::diagnostics::opened(path, || {
+            let reader = Self::from_backing(Backing::Trace(Box::new(
+                crate::trace_input::Input::open_native(path)?,
+            )))?;
+            reader.check_source()?;
+            Ok(reader)
+        })
     }
     pub(crate) fn open_trace_low_memory(path: &Path) -> Result<Self> {
-        let input = crate::trace_input::Input::open(path)?;
-        let prefix = input.is_prefix();
-        let signature = input.signature();
-        let reader = match Self::from_backing(Backing::Trace(Box::new(input))) {
-            Err(e) if prefix => {
-                let spill = crate::trace_input::Input::open_spill(path, e.to_string())?;
-                if spill.signature() != signature {
-                    return Err(Error::new(
-                        "input_changed",
-                        "trace source changed during seek fallback",
-                    ));
+        crate::diagnostics::opened(path, || {
+            let input = crate::trace_input::Input::open(path)?;
+            let prefix = input.is_prefix();
+            let signature = input.signature();
+            let reader = match Self::from_backing(Backing::Trace(Box::new(input))) {
+                Err(e) if prefix => {
+                    let spill = crate::trace_input::Input::open_spill(path, e.to_string())?;
+                    if spill.signature() != signature {
+                        return Err(Error::new(
+                            "input_changed",
+                            "trace source changed during seek fallback",
+                        ));
+                    }
+                    Self::from_backing(Backing::Trace(Box::new(spill)))?
                 }
-                Self::from_backing(Backing::Trace(Box::new(spill)))?
-            }
-            other => other?,
-        };
-        reader.data.check_source()?;
-        Ok(reader)
+                other => other?,
+            };
+            reader.data.check_source()?;
+            Ok(reader)
+        })
     }
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
         Self::from_backing(Backing::Bytes(data))
     }
     pub(crate) fn from_backing(data: Backing) -> Result<Self> {
-        let header = header(data.range(0, data.len().min(17))?.as_ref())?;
-        let (blocks, dna) = data.scan(|reader| {
-            let mut position = header.size;
-            let mut blocks = Vec::new();
-            let mut dna = None;
-            // Fixed layout widths come from the supported BHead formats, not limits.
-            let width = if header.file_format == 1 {
-                32
-            } else {
-                16 + header.pointer_size
-            };
-            input::seek(reader, position)?;
-            loop {
-                let mut encoded = [0u8; 32];
-                let next = checked::add(position, width)?;
-                if next > data.len() {
-                    return Err(Error::new("truncated", "block header"));
-                }
-                input::read_exact(reader, &mut encoded[..width])?;
-                let mut cursor = Cursor {
-                    data: &encoded[..width],
-                    offset: 0,
-                    little: header.little_endian,
-                };
-                let mut code = [0u8; 4];
-                code.copy_from_slice(cursor.take(4)?);
-                let (size, old_address, sdna_index, nr) = if header.file_format == 1 {
-                    let sdna = count(cursor.uint(4)?, 4)?;
-                    let old = cursor.uint(8)?;
-                    let size = count(cursor.uint(8)?, 8)?;
-                    let nr = count(cursor.uint(8)?, 8)?;
-                    (size, old, sdna, nr)
+        let mut span =
+            crate::diagnostics::Span::new("index", serde_json::json!({"decoded_bytes":data.len()}));
+        let result = (|| {
+            let header = header(data.range(0, data.len().min(17))?.as_ref())?;
+            let (blocks, dna) = data.scan(|reader| {
+                let mut position = header.size;
+                let mut blocks = Vec::new();
+                let mut dna = None;
+                // Fixed layout widths come from the supported BHead formats, not limits.
+                let width = if header.file_format == 1 {
+                    32
                 } else {
-                    let size = count(cursor.uint(4)?, 4)?;
-                    let old = cursor.uint(header.pointer_size)?;
-                    let sdna = count(cursor.uint(4)?, 4)?;
-                    let nr = count(cursor.uint(4)?, 4)?;
-                    (size, old, sdna, nr)
+                    16 + header.pointer_size
                 };
-                let offset = next;
-                position = checked::add(offset, size)?;
-                if position > data.len() {
-                    return Err(Error::new("truncated", "block payload"));
-                }
-                if &code == b"ENDB" {
-                    if size != 0 || nr != 0 {
-                        return Err(Error::new("invalid_block", "ENDB payload/count"));
+                input::seek(reader, position)?;
+                loop {
+                    let mut encoded = [0u8; 32];
+                    let next = checked::add(position, width)?;
+                    if next > data.len() {
+                        return Err(Error::new("truncated", "block header"));
                     }
-                    if position != data.len() {
-                        return Err(Error::new("invalid_block", "bytes after ENDB"));
+                    input::read_exact(reader, &mut encoded[..width])?;
+                    let mut cursor = Cursor {
+                        data: &encoded[..width],
+                        offset: 0,
+                        little: header.little_endian,
+                    };
+                    let mut code = [0u8; 4];
+                    code.copy_from_slice(cursor.take(4)?);
+                    let (size, old_address, sdna_index, nr) = if header.file_format == 1 {
+                        let sdna = count(cursor.uint(4)?, 4)?;
+                        let old = cursor.uint(8)?;
+                        let size = count(cursor.uint(8)?, 8)?;
+                        let nr = count(cursor.uint(8)?, 8)?;
+                        (size, old, sdna, nr)
+                    } else {
+                        let size = count(cursor.uint(4)?, 4)?;
+                        let old = cursor.uint(header.pointer_size)?;
+                        let sdna = count(cursor.uint(4)?, 4)?;
+                        let nr = count(cursor.uint(4)?, 4)?;
+                        (size, old, sdna, nr)
+                    };
+                    let offset = next;
+                    position = checked::add(offset, size)?;
+                    if position > data.len() {
+                        return Err(Error::new("truncated", "block payload"));
                     }
-                    break;
+                    if &code == b"ENDB" {
+                        if size != 0 || nr != 0 {
+                            return Err(Error::new("invalid_block", "ENDB payload/count"));
+                        }
+                        if position != data.len() {
+                            return Err(Error::new("invalid_block", "bytes after ENDB"));
+                        }
+                        break;
+                    }
+                    if &code == b"DNA1" && dna.replace((offset, size)).is_some() {
+                        return Err(Error::new("invalid_sdna", "multiple DNA1 blocks"));
+                    }
+                    blocks.push(Block {
+                        code,
+                        old_address,
+                        sdna_index,
+                        count: nr,
+                        data_offset: offset,
+                        size,
+                    });
+                    input::skip(reader, size)?;
                 }
-                if &code == b"DNA1" && dna.replace((offset, size)).is_some() {
-                    return Err(Error::new("invalid_sdna", "multiple DNA1 blocks"));
+                Ok((blocks, dna))
+            })?;
+            let (offset, size) = dna.ok_or_else(|| Error::new("invalid_sdna", "missing DNA1"))?;
+            let schema_span =
+                crate::diagnostics::Span::new("schema", serde_json::json!({"bytes":size}));
+            let schema = schema_span.result(Schema::parse(
+                data.range(offset, size)?.as_ref(),
+                header.little_endian,
+                header.pointer_size,
+            ))?;
+            for block in &blocks {
+                if &block.code != b"DNA1" && block.sdna_index >= schema.structs.len() {
+                    return Err(Error::new("invalid_block", "SDNA index out of range"));
                 }
-                blocks.push(Block {
-                    code,
-                    old_address,
-                    sdna_index,
-                    count: nr,
-                    data_offset: offset,
-                    size,
-                });
-                input::skip(reader, size)?;
             }
-            Ok((blocks, dna))
-        })?;
-        let (offset, size) = dna.ok_or_else(|| Error::new("invalid_sdna", "missing DNA1"))?;
-        let schema = Schema::parse(
-            data.range(offset, size)?.as_ref(),
-            header.little_endian,
-            header.pointer_size,
-        )?;
-        for block in &blocks {
-            if &block.code != b"DNA1" && block.sdna_index >= schema.structs.len() {
-                return Err(Error::new("invalid_block", "SDNA index out of range"));
-            }
-        }
-        Ok(Self {
-            header,
-            blocks,
-            schema,
-            data,
-            by_address: std::cell::OnceCell::new(),
-            name_index: std::cell::OnceCell::new(),
-            owner_index: std::cell::OnceCell::new(),
-        })
+            span.data(serde_json::json!({"blocks":blocks.len(),"types":schema.types.len(),"decoded_bytes":data.len()}));
+            Ok(Self {
+                header,
+                blocks,
+                schema,
+                data,
+                by_address: std::cell::OnceCell::new(),
+                name_index: std::cell::OnceCell::new(),
+                owner_index: std::cell::OnceCell::new(),
+            })
+        })();
+        span.result(result)
     }
     pub fn header(&self) -> &Header {
         &self.header

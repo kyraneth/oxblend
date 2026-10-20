@@ -1,5 +1,9 @@
 Oxblend third-party notices
 
+src/flattrace.rs is the Rust writer from flattrace v1 (MIT), https://github.com/kyraneth/flattrace.
+Copyright (c) 2026 flattrace contributors; full text: src/flattrace-LICENSE
+and THIRD-PARTY-NOTICES. Oxblend owns the event payloads, not the format.
+
 Some output wording mirrors Blender Asset Tracer for compatibility: pack-info instructions, list timing sentences, and the Missing files footer. No Blender Asset Tracer code was taken.
 
 The vendored licence texts for every locked dependency are reproduced in

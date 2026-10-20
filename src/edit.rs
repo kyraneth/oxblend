@@ -82,7 +82,13 @@ impl EditReport {
         "errors":self.errors.iter().map(|e|json!({"edit_index":e.edit_index,"kind":e.kind,"message":e.message})).collect::<Vec<_>>()}),
         )
     }
-    fn fail(&mut self, index: Option<usize>, e: Error) {
+    fn fail(&mut self, index: Option<usize>, mut e: Error) {
+        e.message = format!(
+            "rewrite input {} output {}: {}",
+            crate::value::display_bytes(&self.input_path),
+            crate::value::display_bytes(&self.output_path),
+            e.message
+        );
         self.errors.push(EditFailure {
             edit_index: index,
             kind: e.kind,

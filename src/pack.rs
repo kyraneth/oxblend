@@ -1,5 +1,5 @@
 use crate::edit::{Durability, EditOptions, EditReport, PathRewrite, prepared, rewrite_opened};
-use crate::edit_output::{AtomicOutput, create_directories, io, sync_end};
+use crate::edit_output::{AtomicOutput, create_directories, io_at, sync_end};
 use crate::input::PackInputs;
 use crate::trace::{
     FailureKind, FieldReference, PointerMode, TraceMode, TraceOptions, TraceReport, Usage,
@@ -102,16 +102,6 @@ impl PackReport {
         )
     }
 }
-fn phase(name: &str, started: crate::phase::Start) {
-    if std::env::var_os("OXBLEND_PHASES").is_some() {
-        eprintln!(
-            "OXBLEND_PHASE {} {:.9}",
-            name,
-            started.elapsed().as_secs_f64()
-        );
-    }
-    started.log_rx(name);
-}
 fn raw_hex(path: &Path) -> String {
     hex(path.as_os_str().as_bytes())
 }
@@ -120,7 +110,7 @@ fn bytes_path(v: &[u8]) -> PathBuf {
 }
 fn absolute(path: &Path) -> Result<PathBuf> {
     Ok(crate::trace::lexical(
-        &std::path::absolute(path).map_err(io)?,
+        &std::path::absolute(path).map_err(|e| io_at("resolve absolute path", path, e))?,
     ))
 }
 fn unsafe_path(message: &str) -> Error {
@@ -131,7 +121,7 @@ fn refuse_output_symlink(path: &Path) -> Result<()> {
         Ok(m) if m.file_type().is_symlink() => Err(unsafe_path("symlink pack destination refused")),
         Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io(e)),
+        Err(e) => Err(io_at("stat destination symlink", path, e)),
     }
 }
 fn signature(m: &Metadata) -> (u64, u64, u64, i64, i64) {
@@ -140,13 +130,21 @@ fn signature(m: &Metadata) -> (u64, u64, u64, i64, i64) {
 fn destination_empty(root: &Path) -> Result<bool> {
     refuse_output_symlink(root)?;
     match std::fs::symlink_metadata(root) {
-        Ok(m) if m.is_dir() && std::fs::read_dir(root).map_err(io)?.next().is_none() => Ok(false),
+        Ok(m)
+            if m.is_dir()
+                && std::fs::read_dir(root)
+                    .map_err(|e| io_at("read destination directory", root, e))?
+                    .next()
+                    .is_none() =>
+        {
+            Ok(false)
+        }
         Ok(_) => Err(Error::new(
             "pack_destination",
             "pack directory must be new or empty; never merge/resume",
         )),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
-        Err(e) => Err(io(e)),
+        Err(e) => Err(io_at("stat destination directory", root, e)),
     }
 }
 fn strip_root(path: &Path) -> PathBuf {
@@ -287,12 +285,15 @@ fn magic(pattern: &[u8]) -> bool {
 }
 fn directory_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     let mut entries = std::fs::read_dir(directory)
-        .map_err(io)?
-        .map(|e| e.map(|x| x.path()).map_err(io))
+        .map_err(|e| io_at("read asset directory", directory, e))?
+        .map(|e| {
+            e.map(|x| x.path())
+                .map_err(|e| io_at("read asset entry", directory, e))
+        })
         .collect::<Result<Vec<_>>>()?;
     entries.sort();
     for p in entries {
-        let m = std::fs::symlink_metadata(&p).map_err(io)?;
+        let m = std::fs::symlink_metadata(&p).map_err(|e| io_at("stat sequence member", &p, e))?;
         if m.is_dir() {
             directory_files(&p, files)?;
         } else if p.is_file() {
@@ -313,7 +314,7 @@ fn asset_metadata(path: &Path) -> Result<Metadata> {
                 format!("required asset missing: '{}'", path.display()),
             )
         } else {
-            io(e)
+            io_at("stat asset", path, e)
         }
     })
 }
@@ -369,7 +370,7 @@ fn wildcard_members(path: &Path) -> Result<Vec<PathBuf>> {
             let canonical = match base.canonicalize() {
                 Ok(p) => p,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(io(e)),
+                Err(e) => return Err(io_at("canonicalize wildcard base", &base, e)),
             };
             if !ancestors.insert(canonical) {
                 continue;
@@ -412,10 +413,10 @@ fn scan_directory(directory: &Path) -> Result<Vec<OsString>> {
     let entries = match std::fs::read_dir(directory) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(names),
-        Err(e) => return Err(io(e)),
+        Err(e) => return Err(io_at("read sequence directory", directory, e)),
     };
     for entry in entries {
-        let entry = entry.map_err(io)?;
+        let entry = entry.map_err(|e| io_at("read sequence entry", directory, e))?;
         names.push(entry.file_name());
     }
     names.sort();
@@ -431,14 +432,14 @@ fn push_member(directory: &Path, name: &[u8], files: &mut Vec<PathBuf>) -> Resul
             return Err(unsafe_path("glob matched a directory/nonregular member"));
         }
         Ok(_) => {}
-        Err(e) => return Err(io(e)),
+        Err(e) => return Err(io_at("stat member symlink", &candidate, e)),
     }
     match std::fs::metadata(&candidate) {
         Ok(m) if m.is_file() => files.push(candidate),
         Ok(_) => {
             return Err(unsafe_path("glob matched a directory/nonregular member"));
         }
-        Err(e) => return Err(io(e)),
+        Err(e) => return Err(io_at("stat expanded member", &candidate, e)),
     }
     Ok(())
 }
@@ -604,8 +605,10 @@ fn add_file(
     output: &Path,
     blend: bool,
 ) -> Result<()> {
-    let file = File::open(input).map_err(io)?;
-    let metadata = file.metadata().map_err(io)?;
+    let file = File::open(input).map_err(|e| io_at("open planned input", input, e))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| io_at("fstat planned input", input, e))?;
     if !metadata.is_file() {
         return Err(unsafe_path("pack source is not regular file"));
     }
@@ -745,6 +748,34 @@ fn overview(
 }
 
 pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> Result<PackReport> {
+    let mut span = crate::diagnostics::Span::new(
+        "pack.operation",
+        json!({"roots":inputs.len(),"dry_run":options.noop,"path":new_directory.to_string_lossy()}),
+    );
+    let mut result = pack_inner(inputs, new_directory, options)
+        .map_err(|e| crate::edit_output::context(e, "pack", new_directory));
+    if let Ok(report) = &mut result {
+        for error in &mut report.errors {
+            *error = crate::edit_output::context(error.clone(), "pack", new_directory);
+        }
+        span.data(json!({"complete":report.complete,"planning_complete":report.planning_complete,"missing":report.missing.len(),"files":report.files.len(),"archive_written":report.archive_written,"published_files":report.files.iter().filter(|f| f.output_written).count()}));
+        if !report.complete {
+            span.end(if report.planning_complete {
+                "partial"
+            } else {
+                "refused"
+            });
+            return result;
+        }
+    }
+    span.result(result)
+}
+fn pack_inner(
+    inputs: &[PathBuf],
+    new_directory: &Path,
+    options: &PackOptions,
+) -> Result<PackReport> {
+    let planning = crate::diagnostics::Span::new("pack.plan", json!({}));
     if inputs.is_empty() {
         return Err(unsafe_path("pack needs at least one selected root"));
     }
@@ -776,11 +807,14 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
     }
     let project = absolute(&options.project_root)?;
     let directory = absolute(new_directory)?;
-    let phase_start = crate::phase::Start::new();
     let parsed = PackInputs::new(&roots)?;
     let mut root_traces = Vec::new();
     for root in &roots {
-        if !root.metadata().map_err(io)?.is_file() {
+        if !root
+            .metadata()
+            .map_err(|e| io_at("stat selected root", root, e))?
+            .is_file()
+        {
             return Err(unsafe_path("pack input must be a regular blend file"));
         }
         root_traces.push(trace_with_inputs(
@@ -793,8 +827,6 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
             Some(&parsed),
         )?);
     }
-    phase("root_traces", phase_start);
-    let planning_start = crate::phase::Start::new();
     let usages = root_traces
         .iter()
         .flat_map(|t| t.usages.iter().cloned())
@@ -1179,14 +1211,13 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
         }
         Ok(files)
     })();
-    let files = match planned {
+    let files = match planning.result(planned) {
         Ok(f) => f,
         Err(e) => {
             report.errors.push(e);
             return Ok(report);
         }
     };
-    phase("planning", planning_start);
     report.planning_complete = true;
     // Missing on-disk dependencies do not invalidate a completed plan. Publish
     // the available members, but never report a failing pack with no errors.
@@ -1260,7 +1291,7 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
     } else {
         Durability::None
     };
-    let execution_start = crate::phase::Start::new();
+    let execution_span = crate::diagnostics::Span::new("pack.execute", json!({}));
     let execution = (|| {
         if !archive && destination_empty(&directory)? {
             let creation = create_directories(&directory, options.durability);
@@ -1269,7 +1300,12 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
         }
         for (file, result) in files.values().zip(&mut report.files) {
             let source = &file.input;
-            if signature(&source.metadata().map_err(io)?) != signature(&file.metadata) {
+            if signature(
+                &source
+                    .metadata()
+                    .map_err(|e| io_at("stat source before execution", source, e))?,
+            ) != signature(&file.metadata)
+            {
                 return Err(Error::new(
                     "input_changed",
                     "pack input changed after complete planning",
@@ -1280,7 +1316,15 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
                 .parent()
                 .ok_or_else(|| unsafe_path("file destination parent"))?;
             create_directories(parent, options.durability)?;
-            let file_start = crate::phase::Start::new();
+            let mut member_span = crate::diagnostics::Span::new(
+                if file.blend {
+                    "pack.repath"
+                } else {
+                    "pack.copy"
+                },
+                json!({"input":source.to_string_lossy(),"output":physical_output.to_string_lossy()}),
+            );
+            let member_result = (|| {
             if file.blend {
                 let snapshot = parsed.get(source)?;
                 let source_file = snapshot.open_checked(source)?;
@@ -1314,23 +1358,33 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
                 result.durability_completed = stage.durability_completed;
                 publication?;
             }
-            phase(if file.blend { "rewrite" } else { "copy" }, file_start);
+            Ok(())
+            })().map_err(|e| crate::edit_output::context(e, "copy/repath member", &physical_output));
+            member_span.data(json!({"output_written":result.output_written,"durability_completed":result.durability_completed}));
+            member_span.result(member_result)?;
         }
         let info_path = report
             .info_path
             .as_ref()
             .ok_or_else(|| unsafe_path("pack info plan missing"))?;
         let info = overview(&report, &files, &directory, unique_assets)?;
-        let mut staging =
-            AtomicOutput::create(&input.metadata().map_err(io)?, &physical(info_path)?)?;
-        staging.file.write_all(&info).map_err(io)?;
+        let mut staging = AtomicOutput::create(
+            &input
+                .metadata()
+                .map_err(|e| io_at("stat overview source", &input, e))?,
+            &physical(info_path)?,
+        )?;
+        staging
+            .file
+            .write_all(&info)
+            .map_err(|e| io_at("write pack-info", info_path, e))?;
         let publication = staging.publish(entry_durability);
         report.info_written = staging.published;
         report.info_durability_completed = staging.durability_completed;
         publication?;
         if let Some(workspace) = &workspace {
             let debug = workspace.0.join("bat-debug.log");
-            std::fs::write(&debug, b"Produced by Oxblend. Validated dependency plan; archive publish follows completed ZIP footer.\n").map_err(io)?;
+            std::fs::write(&debug, b"Produced by Oxblend. Validated dependency plan; archive publish follows completed ZIP footer.\n").map_err(|e| io_at("write ZIP debug member", &debug, e))?;
             let mut members = files
                 .values()
                 .map(|f| physical(&f.output))
@@ -1338,7 +1392,12 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
             members.push(physical(info_path)?);
             members.push(debug);
             members.sort();
-            let mut zip = AtomicOutput::create(&input.metadata().map_err(io)?, &directory)?;
+            let mut zip = AtomicOutput::create(
+                &input
+                    .metadata()
+                    .map_err(|e| io_at("stat ZIP source", &input, e))?,
+                &directory,
+            )?;
             crate::pack_zip::emit(&workspace.0, &members, &mut zip.file)?;
             let publication = zip.publish(options.durability);
             report.archive_written = zip.published;
@@ -1360,8 +1419,7 @@ pub fn pack(inputs: &[PathBuf], new_directory: &Path, options: &PackOptions) -> 
         report.durability_completed = options.durability != Durability::None;
         Ok(())
     })();
-    phase("execution", execution_start);
-    match execution {
+    match execution_span.result(execution) {
         Ok(()) => {
             report.complete =
                 report.missing.is_empty() && report.root_traces.iter().all(|t| t.complete)

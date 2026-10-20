@@ -54,19 +54,30 @@ pub(crate) fn sync_directories(directories: &BTreeSet<PathBuf>) -> Result<()> {
     let mut ordered = directories.iter().collect::<Vec<_>>();
     ordered.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
     for directory in ordered {
-        File::open(directory).map_err(io)?.sync_all().map_err(io)?;
+        File::open(directory)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| io_at("open/fsync directory", directory, e))?;
     }
     Ok(())
 }
 #[cfg(target_os = "linux")]
 pub(crate) fn sync_end(directory: &Path) -> Result<()> {
-    let directory = File::open(directory)
-        .map_err(|e| Error::new("durability", format!("End directory open: {e}")))?;
+    let directory_path = directory;
+    let directory = File::open(directory).map_err(|e| {
+        Error::new(
+            "durability",
+            format!("open syncfs directory {}: {e}", directory_path.display()),
+        )
+    })?;
     let result = unsafe { libc::syncfs(directory.as_raw_fd()) };
     if result < 0 {
         return Err(Error::new(
             "durability",
-            format!("End syncfs failed: {}", std::io::Error::last_os_error()),
+            format!(
+                "syncfs directory {}: {}",
+                directory_path.display(),
+                std::io::Error::last_os_error()
+            ),
         ));
     }
     Ok(())
@@ -80,14 +91,14 @@ pub(crate) fn sync_end(_directory: &Path) -> Result<()> {
 }
 pub(crate) fn create_directories(path: &Path, durability: Durability) -> Result<()> {
     if durability != Durability::EachFile {
-        return std::fs::create_dir_all(path).map_err(io);
+        return std::fs::create_dir_all(path).map_err(|e| io_at("create directories", path, e));
     }
     let new = path
         .ancestors()
         .take_while(|p| !p.exists())
         .map(Path::to_path_buf)
         .collect::<Vec<_>>();
-    std::fs::create_dir_all(path).map_err(io)?;
+    std::fs::create_dir_all(path).map_err(|e| io_at("create directories", path, e))?;
     let mut affected = BTreeSet::new();
     for directory in new {
         affected.insert(directory.clone());
@@ -104,6 +115,13 @@ const TEMP_PREFIX: &str = ".oxblend-stage-";
 // Namespace generation only, not cached input state or a retry/resource bound.
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn context(mut error: Error, operation: &str, path: &Path) -> Error {
+    error.message = format!("{operation} '{}': {}", path.display(), error.message);
+    error
+}
+pub(crate) fn io_at(operation: &str, path: &Path, error: std::io::Error) -> Error {
+    context(io(error), operation, path)
+}
 pub(crate) fn io(e: std::io::Error) -> Error {
     Error::new(
         if e.kind() == std::io::ErrorKind::BrokenPipe {
@@ -143,6 +161,8 @@ pub(crate) fn refuse_existing(source: &Metadata, output: &Path) -> Result<()> {
 }
 pub(crate) struct AtomicOutput {
     pub file: File,
+    output: PathBuf,
+    write_span: Option<crate::diagnostics::Span>,
     parent: File,
     name: CString,
     temp: Option<CString>,
@@ -151,6 +171,9 @@ pub(crate) struct AtomicOutput {
 }
 impl AtomicOutput {
     pub fn create(source: &Metadata, output: &Path) -> Result<Self> {
+        Self::create_inner(source, output).map_err(|e| context(e, "create output stage", output))
+    }
+    fn create_inner(source: &Metadata, output: &Path) -> Result<Self> {
         refuse_existing(source, output)?;
         let name = name(output)?;
         let parent_path = output
@@ -191,6 +214,11 @@ impl AtomicOutput {
         };
         Ok(Self {
             file,
+            output: output.to_path_buf(),
+            write_span: Some(crate::diagnostics::Span::new(
+                "write",
+                serde_json::json!({"path":output.to_string_lossy()}),
+            )),
             parent,
             name,
             temp: Some(temp),
@@ -209,6 +237,23 @@ impl AtomicOutput {
         Ok(())
     }
     pub fn publish(&mut self, durability: Durability) -> Result<()> {
+        if let Some(mut span) = self.write_span.take() {
+            if span.active() {
+                span.data(serde_json::json!({"bytes":self.file.metadata().ok().map(|m| m.len())}));
+            }
+            span.end("ok");
+        }
+        let mut span = crate::diagnostics::Span::new(
+            "publish",
+            serde_json::json!({"path":self.output.to_string_lossy()}),
+        );
+        let result = self
+            .publish_inner(durability)
+            .map_err(|e| context(e, "publish/sync output", &self.output));
+        span.data(serde_json::json!({"output_written":self.published,"durability_completed":self.durability_completed}));
+        span.result(result)
+    }
+    fn publish_inner(&mut self, durability: Durability) -> Result<()> {
         if durability == Durability::EachFile {
             self.file.sync_all().map_err(io)?;
         }

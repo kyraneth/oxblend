@@ -19,7 +19,7 @@ impl Workspace {
             match std::fs::DirBuilder::new().mode(0o700).create(&path) {
                 Ok(()) => return Ok(Self(path)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(io(e)),
+                Err(e) => return Err(crate::edit_output::io_at("create ZIP workspace", &path, e)),
             }
         }
     }
@@ -82,6 +82,10 @@ fn storage_method(relative: &Path, path: &Path) -> u16 {
 }
 
 pub(crate) fn emit(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<()> {
+    emit_inner(directory, paths, output)
+        .map_err(|e| crate::edit_output::context(e, "emit ZIP from workspace", directory))
+}
+fn emit_inner(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<()> {
     let mut entries = Vec::new();
     for path in paths {
         let relative = path
@@ -102,8 +106,12 @@ pub(crate) fn emit(directory: &Path, paths: &[PathBuf], output: &mut File) -> Re
             .map_err(|_| Error::new("zip_width", "member name exceeds ZIP u16 width"))?;
 
         let method = storage_method(relative, path);
-        let file = File::open(path).map_err(io)?;
-        let size = file.metadata().map_err(io)?.len();
+        let file =
+            File::open(path).map_err(|e| crate::edit_output::io_at("open ZIP member", path, e))?;
+        let size = file
+            .metadata()
+            .map_err(|e| crate::edit_output::io_at("fstat ZIP member", path, e))?
+            .len();
         let offset = output.stream_position().map_err(io)?;
         u32v(output, 0x04034b50)?;
         u16v(output, 45)?;

@@ -15,12 +15,10 @@ struct Outcome {
 }
 impl Outcome {
     fn report(&self, path: &Path) {
-        if std::env::var_os("OXBLEND_READ_REPORT").is_some() {
-            eprintln!(
-                "OXBLEND_COPY {}",
-                serde_json::json!({"path_hex":crate::value::hex(path.as_os_str().as_encoded_bytes()),"mechanism":self.mechanism,"fallback_errno":self.fallback_errno,"fallback_reason":self.fallback_reason})
-            );
-        }
+        crate::diagnostics::point(
+            "copy.stats",
+            serde_json::json!({"path":path.to_string_lossy(),"bytes":self.bytes,"mechanism":self.mechanism,"fallback_errno":self.fallback_errno,"fallback_reason":self.fallback_reason}),
+        );
     }
 }
 pub(crate) fn native(

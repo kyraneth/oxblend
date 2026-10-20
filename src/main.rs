@@ -44,7 +44,7 @@ const COMMANDS: &[&str] = &[
     "pointer-census",
     "skill",
 ];
-const USAGE: &str = "oxblend COMMAND [OPTIONS]\nFrame range + FPS for every saved Scene: oxblend summary FILE\nBundled offline workflows: oxblend skill\nUse oxblend --help to list commands, oxblend COMMAND --help for arguments; oxblend skill for workflows and contracts.\nInterim phase diagnostics: OXBLEND_PHASE_TIMING=1 (off by default).";
+const USAGE: &str = "oxblend COMMAND [OPTIONS]\nFrame range + FPS for every saved Scene: oxblend summary FILE\nBundled offline workflows: oxblend skill\nUse oxblend --help to list commands, oxblend COMMAND --help for arguments; oxblend skill for workflows and contracts.\nLocal diagnostics: set FLATTRACE_DIR; see oxblend skill.";
 
 fn argument(v: &OsStr) -> Result<&str> {
     v.to_str().ok_or_else(|| {
@@ -186,7 +186,6 @@ fn durability(value: &OsString) -> Result<oxblend::edit::Durability> {
 fn run(args: &[OsString]) -> Result<()> {
     let command = args.get(1).ok_or_else(|| Error::new("usage", USAGE))?;
     let command = argument(command)?;
-    let phase_timing = std::env::var_os("OXBLEND_PHASE_TIMING").is_some_and(|v| v == "1");
     if command == "--help" || command == "-h" {
         println!("{USAGE}\nCommands: {}", COMMANDS.join(" "));
         return Ok(());
@@ -503,8 +502,11 @@ fn run(args: &[OsString]) -> Result<()> {
         }
         let start = std::time::Instant::now();
         let report = trace_overrides(std::path::Path::new(input), options)?;
-        let query = start.elapsed().as_secs_f64();
-        let serialization = std::time::Instant::now();
+        oxblend::diagnostics::point(
+            "query.stats",
+            json!({"elapsed_ms":start.elapsed().as_secs_f64()*1000.0,"complete":report.complete}),
+        );
+        let serialization = oxblend::diagnostics::Span::new("serialize", json!({}));
         let encoded = serde_json::to_vec(&report.json())
             .map_err(|e| Error::new("serialization", e.to_string()))?;
         let mut out = std::io::stdout().lock();
@@ -512,9 +514,7 @@ fn run(args: &[OsString]) -> Result<()> {
             .and_then(|_| out.write_all(b"\n"))
             .and_then(|_| out.flush())
             .map_err(output_error)?;
-        if phase_timing {
-            writeln!(std::io::stderr().lock(), "{}", json!({"overrides_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(output_error)?;
-        }
+        serialization.end("ok");
         if !report.complete {
             return Err(Error::new(
                 "incomplete_overrides",
@@ -562,8 +562,11 @@ fn run(args: &[OsString]) -> Result<()> {
         let mut options = TraceOptions::new(mode, pointers);
         options.low_memory = low_memory;
         let report = trace(std::path::Path::new(input), options)?;
-        let query = start.elapsed().as_secs_f64();
-        let serialization = std::time::Instant::now();
+        oxblend::diagnostics::point(
+            "query.stats",
+            json!({"elapsed_ms":start.elapsed().as_secs_f64()*1000.0,"complete":report.complete}),
+        );
+        let serialization = oxblend::diagnostics::Span::new("serialize", json!({}));
         let encoded = serde_json::to_vec(&report.json())
             .map_err(|e| Error::new("serialization", e.to_string()))?;
         let mut out = std::io::stdout().lock();
@@ -571,9 +574,7 @@ fn run(args: &[OsString]) -> Result<()> {
             .and_then(|_| out.write_all(b"\n"))
             .and_then(|_| out.flush())
             .map_err(output_error)?;
-        if phase_timing {
-            writeln!(std::io::stderr().lock(),"{}",json!({"trace_open_traverse_seconds":query,"serialize_write_seconds":serialization.elapsed().as_secs_f64()})).map_err(output_error)?;
-        }
+        serialization.end("ok");
         if !report.complete {
             return Err(Error::new(
                 "incomplete_trace",
@@ -671,8 +672,11 @@ fn run(args: &[OsString]) -> Result<()> {
             "source changed during per-file fact extraction",
         ));
     }
-    let query = start.elapsed().as_secs_f64() - opened;
-    let serialization = std::time::Instant::now();
+    oxblend::diagnostics::point(
+        "query.stats",
+        json!({"open_index_ms":opened*1000.0,"query_ms":(start.elapsed().as_secs_f64()-opened)*1000.0}),
+    );
+    let serialization = oxblend::diagnostics::Span::new("serialize", json!({}));
     let encoded =
         serde_json::to_vec(&output).map_err(|e| Error::new("serialization", e.to_string()))?;
     let mut out = std::io::stdout().lock();
@@ -680,10 +684,7 @@ fn run(args: &[OsString]) -> Result<()> {
         .and_then(|_| out.write_all(b"\n"))
         .and_then(|_| out.flush())
         .map_err(output_error)?;
-    if phase_timing {
-        let phases = json!({"open_index_seconds":opened, "query_seconds":query, "serialize_write_seconds":serialization.elapsed().as_secs_f64()});
-        writeln!(std::io::stderr().lock(), "{phases}").map_err(output_error)?;
-    }
+    serialization.end("ok");
     Ok(())
 }
 // Structured argv are data, never an interpolated shell command. Native-byte
@@ -720,7 +721,28 @@ fn next_command(error: &Error, args: &[OsString]) -> Option<Json> {
 }
 fn main() {
     let args = std::env::args_os().collect::<Vec<_>>();
-    if let Err(error) = run(&args) {
+    let requested = args.get(1).and_then(|v| v.to_str()).unwrap_or("invalid");
+    let command = if matches!(requested, "--help" | "-h")
+        || args.get(2).is_some_and(|a| a == "--help" || a == "-h")
+    {
+        "help"
+    } else if matches!(requested, "--version" | "-V") {
+        "version"
+    } else if COMMANDS.contains(&requested) {
+        requested
+    } else {
+        "invalid"
+    };
+    oxblend::diagnostics::init(&args, command);
+    let span = oxblend::diagnostics::Span::new(command, json!({}));
+    let result = span.result(run(&args));
+    oxblend::diagnostics::finish(
+        result
+            .as_ref()
+            .err()
+            .map_or("ok", oxblend::diagnostics::outcome),
+    );
+    if let Err(error) = result {
         let _ = writeln!(
             std::io::stderr().lock(),
             "{}",

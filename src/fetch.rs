@@ -20,6 +20,7 @@ struct Job {
     path: PathBuf,
     blend: bool,
     reply: mpsc::Sender<Result<Raw>>,
+    parent: Option<String>,
 }
 #[derive(Default)]
 struct Queue {
@@ -62,6 +63,33 @@ fn io(e: std::io::Error) -> Error {
         e.to_string(),
     )
 }
+fn occupied_fds(limit: libc::rlim_t) -> Result<(usize, &'static str)> {
+    if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
+        // The enumeration itself owns one descriptor. Do not silently undercount
+        // when reading a directory entry fails: fall back to descriptor probes.
+        if let Ok(entries) = entries.collect::<std::io::Result<Vec<_>>>() {
+            return Ok((entries.len().saturating_sub(1), "proc"));
+        }
+    }
+    let mut occupied = 0;
+    // fcntl takes a signed int descriptor; RLIMIT_NOFILE is the external bound
+    // on allocatable descriptor numbers. High inherited FDs above a lowered
+    // limit cannot consume allocatable slots below it.
+    for fd in 0..limit.min(i32::MAX as libc::rlim_t) {
+        if unsafe { libc::fcntl(fd as i32, libc::F_GETFD) } >= 0 {
+            occupied += 1;
+        } else {
+            let e = std::io::Error::last_os_error();
+            if e.raw_os_error() != Some(libc::EBADF) {
+                return Err(Error::new(
+                    "io",
+                    format!("fcntl(F_GETFD) descriptor {fd} while counting pack slots: {e}"),
+                ));
+            }
+        }
+    }
+    Ok((occupied, "fcntl"))
+}
 impl Fetcher {
     pub fn new(roots: usize) -> Result<Self> {
         let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
@@ -70,11 +98,14 @@ impl Fetcher {
         }
         let limit = unsafe { limit.assume_init() }.rlim_cur;
 
-        let occupied = std::fs::read_dir("/proc/self/fd").map_err(io)?.count() - 1;
+        // /proc is an optimization for counting occupied descriptor slots, not
+        // a packaging prerequisite. F_GETFD works in containers without procfs.
+        let (occupied, fd_source) = occupied_fds(limit)?;
 
+        // Actual simultaneously live publication descriptors: source (1),
+        // AtomicOutput file + parent (2), and directory/sync helper (1).
         let publication_fds = 1 + 2 + 1;
-
-        let worker_fds = 1 + usize::from(std::env::var_os("OXBLEND_RX_INTERFACE").is_some());
+        let worker_fds = 1; // one open source per fetch lane
         let slots = usize::try_from(limit)
             .unwrap_or(usize::MAX)
             .saturating_sub(occupied + publication_fds)
@@ -86,11 +117,10 @@ impl Fetcher {
             ));
         }
         let lanes = roots.min(slots);
-        if std::env::var_os("OXBLEND_PHASES").is_some() {
-            eprintln!(
-                "OXBLEND_FD_BUDGET {limit} {occupied} {publication_fds} {worker_fds} {lanes}"
-            );
-        }
+        crate::diagnostics::point(
+            "fetch.budget",
+            serde_json::json!({"limit":limit,"occupied":occupied,"publication_fds":publication_fds,"worker_fds":worker_fds,"lanes":lanes,"source":fd_source}),
+        );
         let shared = Arc::new(Shared::default());
         let threads = (0..lanes)
             .map(|_| {
@@ -113,7 +143,8 @@ impl Fetcher {
                                 queue = shared.wake.wait(queue).unwrap();
                             }
                         };
-                        let result = fetch(&job.path, job.blend, &shared);
+                        let span = crate::diagnostics::Span::under("fetch", serde_json::json!({"path":job.path.to_string_lossy(),"blend":job.blend}), job.parent.as_deref());
+                        let result = span.result(fetch(&job.path, job.blend, &shared));
                         let _ = job.reply.send(result);
                     }
                 })
@@ -136,6 +167,7 @@ impl Fetcher {
             path: path.to_path_buf(),
             blend,
             reply,
+            parent: crate::diagnostics::worker_parent(),
         };
         let mut queue = self.shared.queue.lock().unwrap();
         if blend {
@@ -309,7 +341,11 @@ fn le_magic(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().expect("four-byte physical magic"))
 }
 fn fetch(path: &Path, blend: bool, shared: &Shared) -> Result<Raw> {
-    let started = crate::phase::Start::new();
+    let mut span = crate::diagnostics::Span::new(
+        "file.open",
+        serde_json::json!({"path":path.to_string_lossy()}),
+    );
+    let result = (|| {
     if !path.metadata().map_err(io)?.is_file() {
         return Err(Error::new("pack_path", "pack source is not regular file"));
     }
@@ -348,23 +384,11 @@ fn fetch(path: &Path, blend: bool, shared: &Shared) -> Result<Raw> {
             "source signature changed during snapshot",
         ));
     }
-    if std::env::var_os("OXBLEND_PHASES").is_some() {
-        eprintln!(
-            "OXBLEND_FETCH {:.9} {} {} {}",
-            started.elapsed().as_secs_f64(),
-            metadata.len(),
-            if blend { "blend" } else { "opaque" },
-            crate::value::hex(path.as_os_str().as_encoded_bytes())
-        );
-    }
-    started.log_rx("fetch");
-
+    span.data(serde_json::json!({"size_bytes":metadata.len(),"decoded_bytes":bytes.len(),"blend":blend}));
     drop(file);
-    Ok(Raw {
-        metadata,
-        bytes,
-        proof,
-    })
+    Ok(Raw { metadata, bytes, proof })
+    })().map_err(|e| crate::edit_output::context(e, "fetch/read snapshot", path));
+    span.result(result)
 }
 
 #[cfg(test)]
@@ -467,7 +491,13 @@ mod tests {
         shared.queue.lock().unwrap().closed = true;
         let error = fetch(&file.0, false, &shared).unwrap_err();
         assert_eq!(error.kind, "io");
-        assert_eq!(error.message, "owning pack stopped private fetch");
+        assert_eq!(
+            error.message,
+            format!(
+                "fetch/read snapshot '{}': owning pack stopped private fetch",
+                file.0.display()
+            )
+        );
     }
 
     /// input-capture.md: a source that changes during capture fails

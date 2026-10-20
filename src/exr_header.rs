@@ -124,6 +124,9 @@ fn read_channels(value: &[u8], max: usize) -> Result<Vec<Channel>> {
     Ok(channels)
 }
 pub fn read(path: &Path) -> Result<ExrHeader> {
+    crate::diagnostics::opened(path, || read_inner(path))
+}
+fn read_inner(path: &Path) -> Result<ExrHeader> {
     let mut f = File::open(path).map_err(io)?;
     let before = f.metadata().map_err(io)?;
     let length = before.len();

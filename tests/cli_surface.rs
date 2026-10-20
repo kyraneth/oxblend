@@ -180,14 +180,14 @@ fn bundled_guide_and_summary_do_not_depend_on_cwd_or_environment() {
 }
 
 #[test]
-fn phases_are_explicit_opt_in_for_reflection_trace_and_overrides() {
+fn retired_phase_variables_do_not_change_output() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/file-ops/synthetic-empty-seed.blend");
     for command in ["summary", "trace", "overrides"] {
         let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
             .arg(command)
             .arg(&source)
-            .env_remove("OXBLEND_PHASE_TIMING")
+            .env_remove("FLATTRACE_DIR")
             .output()
             .unwrap();
         assert!(
@@ -203,13 +203,15 @@ fn phases_are_explicit_opt_in_for_reflection_trace_and_overrides() {
         let timed = Command::new(env!("CARGO_BIN_EXE_oxblend"))
             .arg(command)
             .arg(&source)
+            .env_remove("FLATTRACE_DIR")
             .env("OXBLEND_PHASE_TIMING", "1")
+            .env("OXBLEND_PHASES", "1")
+            .env("OXBLEND_READ_REPORT", "1")
             .output()
             .unwrap();
         assert!(timed.status.success());
         assert_eq!(out.stdout, timed.stdout);
-        let phases: serde_json::Value = serde_json::from_slice(&timed.stderr).unwrap();
-        assert!(phases["serialize_write_seconds"].is_number());
+        assert!(timed.stderr.is_empty());
     }
 }
 

@@ -1,3 +1,23 @@
+# Oxblend 1.3.0
+
+- Local flattrace v1 diagnostics via nonempty `FLATTRACE_DIR`; W3C
+  `FLATTRACE_TRACEPARENT` parents the run. The MIT writer is vendored from
+  flattrace v1 (MIT), https://github.com/kyraneth/flattrace, the format owner;
+  no new dependency or network.
+- Command, file open, index/schema, serialization, pack plan/copy/repath, staged
+  write and publication spans retain honest outcomes. A kill stays unfinished;
+  sink failure warns once and never changes command output or exit status.
+- Removed `OXBLEND_PHASE_TIMING`, `OXBLEND_PHASES`, `OXBLEND_READ_REPORT`
+  emitters (including the old RX-interface diagnostic). Their timing, byte,
+  block and copy facts now live in flattrace data; fallback warnings remain.
+- Pack no longer requires procfs: descriptor counting uses `fcntl(F_GETFD)`
+  when `/proc/self/fd` is unavailable. Pack I/O errors identify operation/path.
+- Bundled guide adds trace/list extraction using `python3`, distinguishes UDIM
+  tiles from animation frames, and separates weak import origins and runtime
+  brushes from project dependencies.
+- `flattrace-events.json` and reference-checker qualification cover every
+  command plus read/write/archive/dry-run/error branches. See USAGE.
+
 # Oxblend 1.2.0
 
 - Library-owned `summary::summarize(&BlendFile)` reuses one reader; the CLI only renders it.

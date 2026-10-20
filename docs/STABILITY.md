@@ -75,9 +75,9 @@ Returned errors, including `broken_pipe`, produce a schema-1 JSON stderr envelop
 where stderr remains writable, with `error.kind` and `error.message`. Common
 refusals add `error.next_command`: structured `argv` (UTF-8 or null) and exact
 native-byte `argv_hex`; this is data, not executable shell text. Suggestions do
-not retry writes. Phase timing JSON is off by default; `OXBLEND_PHASE_TIMING=1`
-enables the interim emitter until T4 diagnostic trace mode replaces it. Timings
-are not stable machine interfaces. Explicit reader diagnostics/warnings remain. A report can be printed to stdout before failure; Rust
+not retry writes. Local diagnostics use flattrace v1 when `FLATTRACE_DIR` is
+nonempty. This does not change stdout schemas or command exit codes; sink
+failure warns once and disables tracing. Reader fallback warnings remain. A report can be printed to stdout before failure; Rust
 `Ok(report)` can contain `complete:false`. Check completeness and each
 publication/durability field, not only whether JSON parsed or a file exists.
 
@@ -289,8 +289,10 @@ Broken-pipe exit 0 was a delivery defect, repaired to exit 2 / `broken_pipe` in
 1.2.0, including text/help/version. Capture producer status before filtering;
 a downstream shell pipeline can still hide it. Published pack/edit effects are
 not undone by output failure. `skill [print]` is a new text command; its embedded
-guide is version-matched. Default phase JSON is removed; interim explicit
-`OXBLEND_PHASE_TIMING=1` diagnostics remain outside stable interfaces.
+guide is version-matched. Version 1.3.0 removes the interim
+`OXBLEND_PHASE_TIMING`, `OXBLEND_PHASES` and `OXBLEND_READ_REPORT` emitters;
+those variables no longer activate output. Their measurements belong in local
+flattrace span data and reader/copy statistic points.
 
 Trace usages add `resolved_path_hex`, UTF-8-or-null `resolved_path`, and `exists`. The top-level `missing_path_count` counts absent usage sites, not distinct files; `referenced_paths_exist` is true when that count is zero. These are disk observations at JSON serialization time, not an atomic filesystem snapshot: sequence/glob/UDIM existence means a nonempty expansion, not every possible member. Directories count as present. `complete` retains its traversal meaning and does not promise disk availability. Nested trace reports and list full-info usages expose the same fields.
 

@@ -2,6 +2,54 @@
 
 Commands are case-sensitive. `oxblend --help` lists all commands; `oxblend COMMAND --help` lists that command's arguments and flags; `--version` prints the package version. Paths accept native Unix bytes. Flags, integers and JSON field paths must be UTF-8. Retain stdout, stderr and the exit status together. `oxblend skill` (or `oxblend skill print`) prints the version-matched bundled guide offline; no checkout or separate docs installation is required.
 
+## Local flattrace diagnostics
+
+```sh
+FLATTRACE_DIR=/path/to/local-traces oxblend summary scene.blend
+# Optional: FLATTRACE_TRACEPARENT=00-<32hex-trace>-<16hex-parent>-<2hex-flags>
+```
+
+Nonempty `FLATTRACE_DIR` creates a fresh per-run JSONL file, never overwrites.
+Unset/empty performs no trace I/O. Studio launchers can set it persistently;
+the public binary remains opt-in. Run data includes sanitized argv, tool
+version, binary SHA-256 when readable, OS, architecture and hostname; unknown
+reported facts are null. It never dumps the environment. Invalid traceparent
+disables tracing with a warning rather than changing command results.
+
+The tool-owned [event list](../flattrace-events.json) describes spans and data.
+CLI spans include argument parsing and complete stdout delivery; lower-level
+spans distinguish file open, index/schema, pack plan/copy/repath, stage writes
+and publication. `reader.stats` and `copy.stats` retain measured transport facts.
+Outcomes distinguish ok, error, refused, partial and unknown. Scope abandonment
+is unknown, not success; SIGKILL leaves missing ends, never a fabricated cancel
+or run completion. Durations are residence milliseconds, not CPU time; do not
+sum nested/overlapping spans. Flush is not crash durability.
+
+Sink failure warns once on stderr and disables tracing, without changing stdout
+or the command's exit status. Tracing itself holds one file descriptor;
+under an exhausted process FD limit it can reduce product resource headroom.
+Command/run `partial` means an incomplete report, not necessarily published
+files: inspect operation-span outcomes and publication fields separately.
+Raw files contain local paths/hostnames. The
+flattrace v1 reference checker/exporter is a separate MIT checkout; set
+`PYTHONPATH` to its root (no Python package installation required):
+```sh
+PYTHONPATH=/path/to/flattrace python3 -m flattrace check --events flattrace-events.json /path/to/traces/*.jsonl
+PYTHONPATH=/path/to/flattrace python3 -m flattrace export /path/to/traces/*.jsonl --out /path/to/fresh-export --path PRIVATE_PATH --host PRIVATE_HOST --user PRIVATE_USER
+# Every-command qualification (uses the release binary by default):
+FLATTRACE_CHECKOUT=/path/to/flattrace python3 scripts/check-flattrace.py
+# Or include it in the whole suite:
+FLATTRACE_CHECKOUT=/path/to/flattrace scripts/qualify.sh
+```
+Review the exported bytes and scan private markers before sharing. Export is
+the only redaction route, not a secret detector. Originals stay local. No
+upload, deletion, retention policy, viewer or collector is implied.
+Checker/export exit 1 retains unfinished evidence; it is not successful work.
+Command coverage requirements deliberately apply to early failures too;
+qualification separately verifies successful branches' lower-level spans.
+Library users do not implicitly activate a process writer; the CLI initializes
+the unstable diagnostic adapter.
+
 ## Exit status
 
 - **0:** declared command contract completed, including complete stdout delivery.
@@ -10,7 +58,7 @@ Commands are case-sensitive. `oxblend --help` lists all commands; `oxblend COMMA
 - **5:** explicit pack project path does not exist; nothing written.
 - **Signal/other:** external termination or unexpected failure; inspect the destination before retrying.
 
-Hard errors are JSON stderr: `{"schema":1,"error":{"kind":"...","message":"..."}}`. Common refusals add `error.next_command` with structured `argv` (UTF-8 or null) and native-byte `argv_hex`; do not interpolate these arguments into a shell script. Missing/type-mismatched fields and invalid block indices point to `inspect FILE`; usage errors point to command help. Suggestions do not execute anything. Phase JSON is off by default. Set `OXBLEND_PHASE_TIMING=1` for interim stderr timings on summary/reflection/facts, trace and overrides. This opt-in is temporary until T4 diagnostic trace mode replaces it; timings remain outside stable machine interfaces. Existing explicit reader diagnostics/warnings are unchanged. A command can emit JSON stdout and then exit 2. Library `Ok(report)` can have `complete=false`. With two input arguments, `diff` also emits its v1 incomplete stdout report on returned comparison/read errors; argument-count errors remain stderr-only.
+Hard errors are JSON stderr: `{"schema":1,"error":{"kind":"...","message":"..."}}`. Common refusals add `error.next_command` with structured `argv` (UTF-8 or null) and native-byte `argv_hex`; do not interpolate these arguments into a shell script. Missing/type-mismatched fields and invalid block indices point to `inspect FILE`; usage errors point to command help. Suggestions do not execute anything. Set `FLATTRACE_DIR` for local flattrace v1 diagnostics; unset/empty means no trace I/O. Sink failure warns once without changing command output or exit status. Old phase/read-report variables are removed; reader fallback warnings remain. A command can emit JSON stdout and then exit 2. Library `Ok(report)` can have `complete=false`. With two input arguments, `diff` also emits its v1 incomplete stdout report on returned comparison/read errors; argument-count errors remain stderr-only.
 
 ## All 19 commands
 
@@ -117,6 +165,10 @@ A missing/unreadable library can produce an incomplete report; a final input-sig
 Default trace/list retain raw read windows or decoded compressed bytes. Opt-in `--low-memory` uses lazy seekable-zstd frame reads with private unnamed spill storage; gzip/non-seekable zstd use checked full-stream decoding to spill. It trades speed and temporary disk use for lower memory use. A partial read does not certify full-source checksums. `blocks` remains streaming without spill or retained decoded frames. Memory can still grow with indexes and reports; there is no memory ceiling. Whole-file census is diagnostic, not a semantic reconstruction certificate. Read-only pointer profiles do not automatically authorize writes.
 
 ## Packing
+
+Pack does not require `/proc`. It uses `/proc/self/fd` only to count occupied
+descriptor slots quickly; without it, `fcntl(F_GETFD)` probes the OS descriptor
+range under `RLIMIT_NOFILE`. I/O diagnostics identify the operation and path.
 
 Options: `--exclude GLOB...`/`-e` (repeatable), `--noop`/`--dry-run`/`-n`, `--relative-only`/`-r`, `--compress`/`-c`, `--keep-hierarchy`, `--durability none|end|each-file`. Short `-nrc` switches may be combined. `--exclude=GLOB`, `--project=PROJECT`, `--target=TARGET` (sequence only) and `--durability=VALUE` are also accepted. Exclusions match resolved usage paths component-wise and right-anchored. Relative-only leaves absolute references uncopied/unmodified. Dry-run writes nothing. Explicit compression emits seekable zstd; ZIP plus compression is refused. URL upload targets are unsupported.
 

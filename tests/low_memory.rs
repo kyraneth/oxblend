@@ -91,10 +91,9 @@ fn cli_and_api_modes_match_and_damaged_seek_metadata_reports_fallback() {
                 );
                 assert_eq!(warning["warning"]["reason"], "damaged seek footer magic");
                 assert_eq!(baseline.stdout, plain.stdout);
-                assert!(
-                    String::from_utf8_lossy(&low.stderr)
-                        .contains("untrusted → checked_full_streaming_spill")
-                );
+                // Retired read-report controls add no stderr; the structured
+                // fallback warning survives with exactly the same content.
+                assert_eq!(low.stderr, plain.stderr);
                 assert!(String::from_utf8_lossy(&low.stderr).contains("damaged seek footer magic"));
             }
         }
