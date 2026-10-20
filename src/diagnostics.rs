@@ -24,7 +24,9 @@ fn with_writer<T>(f: impl FnOnce(&mut flattrace::Writer) -> std::io::Result<T>) 
 }
 /// Initialize once at the real CLI entry; allowlisted facts only, no env dump.
 pub fn init(args: &[std::ffi::OsString], command: &str) {
-    if std::env::var_os("FLATTRACE_DIR").is_none_or(|v| v.is_empty()) {
+    if std::env::var_os("FLATTRACE_DIR").is_none_or(|v| v.is_empty())
+        || flattrace::level_from_env().0 == 0
+    {
         return;
     }
     let host = std::fs::read_to_string("/etc/hostname")

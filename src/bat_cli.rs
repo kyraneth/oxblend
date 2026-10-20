@@ -261,8 +261,8 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
         },
     )?;
     for e in &report.errors {
-        // Missing physical declarations are checked below, before any listing.
-        // An incomplete serialized trace still refuses; trace exposes details.
+        // Missing physical declarations permit an incomplete listing below.
+        // Other incomplete serialized traces still refuse; trace exposes details.
         if !matches!(e.kind, FailureKind::MissingLibrary) {
             return Err(Error::new(
                 "incomplete_trace",
@@ -274,6 +274,8 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
     let mut groups: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
     let mut text_members: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
     let mut directories: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
+    let mut missing: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
+    let mut missing_error = None;
     for u in &report.usages {
         let owner = PathBuf::from(OsString::from_vec(u.owner_file.clone()));
         let resource = trace::resolve(&owner, &u.asset_path);
@@ -286,20 +288,27 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
             directory_listing(&resource, &mut members)?;
             members
         } else {
-            // Preserve the existing listing shape, but never omit missing
-            // declarations as though the dependency inventory were complete.
-            crate::pack::expand(&resource, u.is_sequence).map_err(|mut error| {
-                if error.kind == "missing_asset" && u.block_code == b"LI" {
-                    error.kind = "missing_library";
+            match crate::pack::expand(&resource, u.is_sequence) {
+                Ok(members) => members,
+                Err(mut error) if error.kind == "missing_asset" => {
+                    if u.block_code == b"LI" {
+                        error.kind = "missing_library";
+                    }
+                    error.message = format!(
+                        "{}; referenced by block {} in '{}'; use trace for per-usage availability",
+                        error.message,
+                        u.block_address,
+                        crate::value::display_bytes(&u.owner_file)
+                    );
+                    missing_error.get_or_insert(error);
+                    missing
+                        .entry(owner.clone())
+                        .or_default()
+                        .insert(resource.clone());
+                    vec![resource]
                 }
-                error.message = format!(
-                    "{}; referenced by block {} in '{}'; use trace for per-usage availability",
-                    error.message,
-                    u.block_address,
-                    crate::value::display_bytes(&u.owner_file)
-                );
-                error
-            })?
+                Err(error) => return Err(error),
+            }
         };
         text_members
             .entry(owner.clone())
@@ -320,17 +329,29 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
                 serde_json::Value::Array(
                     paths
                         .iter()
-                        .map(|p| serde_json::Value::String(json_path(p)))
+                        .map(|p| {
+                            if missing_error.is_some() {
+                                serde_json::json!({"path":json_path(p),"missing":missing.get(owner).is_some_and(|paths| paths.contains(p))})
+                            } else {
+                                serde_json::Value::String(json_path(p))
+                            }
+                        })
                         .collect(),
                 ),
             );
         }
         if full {
-            println!(
-                "{}",
-                serde_json::json!({"files":value,"usages":report.usages.iter().map(trace::Usage::json).collect::<Vec<_>>(),"packed":packed_resources(input, low_memory)?})
-            );
+            let mut value = serde_json::json!({"files":value,"usages":report.usages.iter().map(trace::Usage::json).collect::<Vec<_>>(),"packed":packed_resources(input, low_memory)?});
+            if missing_error.is_some() {
+                value["complete"] = serde_json::json!(false);
+            }
+            println!("{value}");
         } else {
+            let value = if missing_error.is_some() {
+                serde_json::json!({"complete":false,"files":value})
+            } else {
+                serde_json::Value::Object(value)
+            };
             let pretty = serde_json::to_string_pretty(&value)
                 .map_err(|e| Error::new("json", e.to_string()))?;
             // serde_json owns escaping/layout. Double only its structural
@@ -368,9 +389,12 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
             let mut displayed = BTreeSet::new();
             let mut ordered = Vec::new();
             for p in text_members.get(owner).into_iter().flatten() {
-                if !directories
-                    .get(owner)
-                    .is_some_and(|dirs| dirs.iter().any(|d| p.starts_with(d)))
+                // Directory expansion can supply existing members, never an
+                // absent declaration beneath it. Keep that declaration visible.
+                if missing.get(owner).is_some_and(|paths| paths.contains(p))
+                    || !directories
+                        .get(owner)
+                        .is_some_and(|dirs| dirs.iter().any(|d| p.starts_with(d)))
                 {
                     ordered.push(p.clone());
                 }
@@ -385,6 +409,9 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
                     continue;
                 }
                 print!("    {}", shorten(&p, &cwd));
+                if missing.get(owner).is_some_and(|paths| paths.contains(&p)) {
+                    print!(" [missing]");
+                }
                 if sha && p.is_file() {
                     print!(" {}", timed_hash(&p)?);
                 }
@@ -416,7 +443,10 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
             }
         }
     }
-    Ok(())
+    match missing_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 fn packed_resources(input: &Path, low_memory: bool) -> Result<Vec<serde_json::Value>> {
     let file = if low_memory {

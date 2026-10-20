@@ -1,6 +1,6 @@
 // Vendored from flattrace v1 (MIT), https://github.com/kyraneth/flattrace, crates/flattrace/src/lib.rs.
 // Copyright (c) 2026 flattrace contributors. MIT; see flattrace-LICENSE.
-// Product adapter: warn visibility only; upstream tests live in the format repo.
+// Product adapter: warn/level parser visibility only; upstream tests live in the format repo.
 // Keep upstream writer logic intact; project Clippy style is not a fork.
 #![allow(
     dead_code,
@@ -20,6 +20,22 @@ use std::{
 };
 
 pub const CONTEXT_ENV: &str = "FLATTRACE_TRACEPARENT";
+pub const LEVEL_ENV: &str = "FLATTRACE_LEVEL";
+pub(super) fn level_from_env() -> (u64, Option<String>) {
+    let raw = std::env::var_os(LEVEL_ENV).unwrap_or_default();
+    let raw = raw.to_string_lossy();
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return (1, None);
+    }
+    if raw.bytes().all(|b| b.is_ascii_digit()) {
+        // u64 is the integer representation used by this writer and serde_json.
+        if let Ok(level) = raw.parse::<u64>() {
+            return (level, None);
+        }
+    }
+    (1, Some(format!("invalid {LEVEL_ENV} '{raw}' treated as 1")))
+}
 static WARNED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 pub(super) fn warn(error: &io::Error) {
     let pid = std::process::id();
@@ -168,6 +184,7 @@ pub struct Writer {
     flags: String,
     pid: u32,
     seq: u64,
+    level: u64,
     active: BTreeMap<String, (String, Option<String>, Instant)>,
 }
 impl Writer {
@@ -190,18 +207,30 @@ impl Writer {
     ) -> io::Result<Self> {
         Self::create_at(path, tool, version, argv, host, data, id(16)?, false)
     }
-    /// Products use this entry point: off without FLATTRACE_DIR; sink failures never fail the product.
+    /// Products use this entry point: off without FLATTRACE_DIR or at level 0;
+    /// sink failures never fail the product.
     pub fn from_env(
         tool: &str,
         version: &str,
         argv: Vec<String>,
         host: &str,
-        data: Value,
+        mut data: Value,
     ) -> io::Result<Option<Self>> {
+        let (level, note) = level_from_env();
+        if level == 0 {
+            return Ok(None);
+        }
         let directory = match std::env::var_os("FLATTRACE_DIR") {
             Some(v) if !v.is_empty() => std::path::PathBuf::from(v),
             _ => return Ok(None),
         };
+        if !data.is_object() {
+            return Err(invalid("data must be an object"));
+        }
+        data["level"] = json!(level);
+        if let Some(note) = note {
+            add_note(&mut data, &note);
+        }
         if tool.is_empty()
             || !tool
                 .bytes()
@@ -230,7 +259,10 @@ impl Writer {
                 run,
                 true,
             ) {
-                Ok(w) => return Ok(Some(w)),
+                Ok(mut w) => {
+                    w.level = level;
+                    return Ok(Some(w));
+                }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) if e.kind() != io::ErrorKind::InvalidInput => {
                     warn(&e);
@@ -274,6 +306,7 @@ impl Writer {
             flags,
             pid: std::process::id(),
             seq: 0,
+            level: 1,
             active: BTreeMap::new(),
         };
         let root = w.root.clone();
@@ -344,6 +377,9 @@ impl Writer {
         self.active
             .insert(span.clone(), (event.into(), parent, Instant::now()));
         Ok(span)
+    }
+    pub fn level(&self) -> u64 {
+        self.level
     }
     pub fn root_span(&self) -> &str {
         &self.root

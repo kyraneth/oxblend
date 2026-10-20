@@ -1,3 +1,19 @@
+# Oxblend 1.3.1
+
+- Missing physical dependencies no longer suppress `list` output.
+  Text marks absent declarations `[missing]`; incomplete JSON has `complete:false`
+  and owner-grouped `files` with explicit `path`/`missing` member records. Available
+  members are retained, and exit 2 plus typed stderr diagnostics remain. Successful
+  listings keep their existing JSON shape; missing IDs and hard trace failures
+  still refuse. Saved override references retain their physical source-library
+  declarations in `list` (fixing the Sprite Village existing-library omission)
+  without changing `trace`/`pack` selection or censusing unused Library headers.
+- Re-vendored the MIT flattrace Rust writer's `FLATTRACE_LEVEL` support: 0 disables
+  trace I/O, unset/empty defaults to 1, digits select a u64, invalid/overflow falls
+  back to 1 with a run note; run-start `data.level` records the effective value.
+  Oxblend's events are identical at levels 1 and 2 (none are debug-only).
+- Updated the bundled guide, help and stability contract for 1.3.1.
+
 # Oxblend 1.3.0
 
 - Local flattrace v1 diagnostics via nonempty `FLATTRACE_DIR`; W3C

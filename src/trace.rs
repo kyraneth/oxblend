@@ -1797,6 +1797,23 @@ impl Context<'_> {
             }
             local.insert(v);
             if !asset_roots {
+                if self.library_policy == LibraryPolicy::ExistingOnly
+                    && let Some(definition) = self.optptr(v, &["id", "override_library"])?
+                    && let Some(reference) = self.optptr(definition, &["reference"])?
+                {
+                    // A local override already supplies its saved asset state,
+                    // but its serialized reference still names a physical
+                    // source library. List that declaration without widening
+                    // the selected asset graph used by trace or pack.
+                    let field = if self.ty(reference)? == b"ID" {
+                        &["lib"][..]
+                    } else {
+                        &["id", "lib"][..]
+                    };
+                    if let Some(library) = self.optptr(reference, field)? {
+                        local.insert(library);
+                    }
+                }
                 match self.expand(v) {
                     Ok(next) => queue.extend(next),
                     Err(e) => self.capture(*e),
@@ -2177,6 +2194,61 @@ mod serialized_vectors {
             warnings[1]["library_path_hex"],
             hex(b"/oxblend-test/missing-a.blend")
         );
+    }
+
+    #[test]
+    fn listing_retains_selected_override_source_library_without_censusing_unused_headers() {
+        let structures = [
+            (
+                "ID",
+                80,
+                vec![
+                    ("char", "name[64]"),
+                    ("Library", "*lib"),
+                    ("IDOverrideLibrary", "*override_library"),
+                ],
+            ),
+            ("Object", 80, vec![("ID", "id")]),
+            ("IDOverrideLibrary", 8, vec![("ID", "*reference")]),
+            ("Library", 208, vec![("ID", "id"), ("char", "name[128]")]),
+        ];
+        let id = |name: &[u8], library: u64, definition: u64| {
+            let mut data = fixed(name, 64);
+            data.extend_from_slice(&library.to_le_bytes());
+            data.extend_from_slice(&definition.to_le_bytes());
+            data
+        };
+        let library = |name: &[u8], path: &[u8]| {
+            let mut data = id(name, 0, 0);
+            data.extend(fixed(path, 128));
+            data
+        };
+        let bytes = saved(
+            &structures,
+            &[
+                (b"OB", 1, 1, id(b"OBselected", 0, 2)),
+                (b"DATA", 2, 2, 3u64.to_le_bytes().to_vec()),
+                (b"ID", 3, 0, id(b"OBsource", 4, 0)),
+                (b"LI", 4, 3, library(b"LIsource", b"//source.blend")),
+                (b"LI", 5, 3, library(b"LIunused", b"//unused.blend")),
+            ],
+        );
+        let mut selected_trace = context(bytes.clone());
+        selected_trace
+            .file_trace(0, Some(vec![b"OBselected".to_vec()]))
+            .unwrap();
+        assert!(selected_trace.report.usages.is_empty());
+        let mut listing = context(bytes);
+        listing.library_policy = LibraryPolicy::ExistingOnly;
+        listing
+            .file_trace(0, Some(vec![b"OBselected".to_vec()]))
+            .unwrap();
+        assert!(listing.report.errors.is_empty());
+        assert_eq!(listing.report.usages.len(), 1);
+        assert_eq!(listing.report.usages[0].asset_path, b"//source.blend");
+        // Neither unrelated Library headers nor the reference ID's asset
+        // graph are scanned; the physical source declaration is sufficient.
+        assert_eq!(listing.files.len(), 1);
     }
 
     #[test]

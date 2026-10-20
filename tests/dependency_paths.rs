@@ -648,7 +648,8 @@ fn missing_linked_ids_are_typed_incomplete_and_publish_other_existing_members() 
             .any(|u| u["block_type"] == "Image"),
         "{j}"
     );
-    // List deliberately has no partial-list protocol in 1.0: fail closed.
+    // Missing linked IDs still refuse; 1.3.1 partial listings cover only
+    // missing physical assets/libraries, not an incomplete serialized trace.
     let listing = Command::new(env!("CARGO_BIN_EXE_oxblend"))
         .arg("list")
         .arg(&root)

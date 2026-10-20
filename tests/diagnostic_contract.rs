@@ -77,7 +77,7 @@ fn summary_missing_fields_are_typed_warnings_and_id_families_are_named() {
 }
 
 #[test]
-fn missing_references_refuse_list_but_do_not_redefine_trace_completeness() {
+fn missing_references_print_incomplete_list_but_do_not_redefine_trace_completeness() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
     let work = std::env::temp_dir().join(format!("oxblend-missing-list-{}", std::process::id()));
     std::fs::create_dir(&work).unwrap();
@@ -95,11 +95,26 @@ fn missing_references_refuse_list_but_do_not_redefine_trace_completeness() {
             let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
                 .arg("list")
                 .arg(&file)
-                .args(flags)
+                .args(&flags)
                 .output()
                 .unwrap();
             assert_eq!(out.status.code(), Some(2));
-            assert!(out.stdout.is_empty());
+            if flags.contains(&"--json") {
+                let listing: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(listing["complete"], false);
+                let members: Vec<_> = listing["files"]
+                    .as_object()
+                    .unwrap()
+                    .values()
+                    .flat_map(|v| v.as_array().unwrap())
+                    .collect();
+                assert!(members.iter().any(
+                    |m| m["missing"] == true && m["path"].as_str().unwrap().ends_with(missing)
+                ));
+            } else {
+                let text = String::from_utf8(out.stdout).unwrap();
+                assert!(text.contains(&format!("{missing} [missing]")));
+            }
             let j: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
             assert_eq!(j["error"]["kind"], kind);
             assert!(j["error"]["message"].as_str().unwrap().contains(missing));
@@ -140,6 +155,68 @@ fn missing_references_refuse_list_but_do_not_redefine_trace_completeness() {
             assert_eq!(j["errors"][0]["field_path"], serde_json::json!(["name"]));
         }
     }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+#[test]
+fn missing_list_retains_existing_members_and_corrupt_libraries_still_refuse() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
+    let work = std::env::temp_dir().join(format!("oxblend-mixed-list-{}", std::process::id()));
+    std::fs::create_dir(&work).unwrap();
+    for name in ["mesh-material-root.blend", "mesh-material-library.blend"] {
+        std::fs::copy(fixtures.join(name), work.join(name)).unwrap();
+    }
+    let source = work.join("mesh-material-root.blend");
+    for flags in [
+        vec![],
+        vec!["--sha256"],
+        vec!["--json"],
+        vec!["--json", "--full-info"],
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+            .arg("list")
+            .arg(&source)
+            .args(&flags)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        if flags.contains(&"--json") {
+            let listing: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(listing["complete"], false);
+            let members: Vec<_> = listing["files"]
+                .as_object()
+                .unwrap()
+                .values()
+                .flat_map(|v| v.as_array().unwrap())
+                .collect();
+            assert!(members.iter().any(|m| {
+                m["path"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("mesh-material-library.blend")
+                    && m["missing"] == false
+            }));
+            assert!(
+                members
+                    .iter()
+                    .any(|m| m["path"].as_str().unwrap().ends_with("texture.png")
+                        && m["missing"] == true)
+            );
+        } else {
+            let text = String::from_utf8(out.stdout).unwrap();
+            assert!(text.contains("mesh-material-library.blend"));
+            assert!(text.contains("texture.png [missing]"));
+        }
+    }
+    std::fs::write(work.join("mesh-material-library.blend"), b"corrupt").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_oxblend"))
+        .arg("list")
+        .arg(&source)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
     std::fs::remove_dir_all(work).unwrap();
 }
 

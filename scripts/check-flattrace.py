@@ -18,6 +18,7 @@ WORK = Path(tempfile.mkdtemp(prefix='flattrace-', dir=os.environ.get('TMPDIR')))
 TRACES = WORK / 'traces'
 ENV = dict(os.environ, FLATTRACE_DIR=str(TRACES))
 ENV.pop('FLATTRACE_TRACEPARENT', None)
+ENV.pop('FLATTRACE_LEVEL', None)
 CHECK_ENV = dict(os.environ, PYTHONPATH=str(CHECKOUT))
 CONTRACT = ROOT / 'flattrace-events.json'
 
@@ -25,7 +26,7 @@ def checker(paths, events=True):
     argv = ['python3', '-m', 'flattrace', 'check']
     if events:
         argv += ['--events', str(CONTRACT)]
-    return subprocess.run(argv + list(map(str, paths)), env=CHECK_ENV, capture_output=True)
+    return subprocess.run(argv + list(map(str, paths)), env=CHECK_ENV, cwd=CHECKOUT, capture_output=True)
 
 
 def run(command, *args, expected=0, events=()):
@@ -124,6 +125,21 @@ for directory, parent in [(str(blocked), None), (str(WORK / 'bad-context'), 'inv
     actual = subprocess.run([str(BINARY), 'summary', str(source)], env=env, capture_output=True)
     assert (actual.returncode, actual.stdout) == (baseline.returncode, baseline.stdout)
     assert actual.stderr.count(b'flattrace: tracing disabled:') == 1
+# Detail levels exercise the actual CLI and the reference event checker.
+_, default_level = run('summary', source)
+assert default_level[0]['data']['level'] == 1
+for raw, level, note in [('', 1, False), ('2', 2, False), ('invalid', 1, True)]:
+    ENV['FLATTRACE_LEVEL'] = raw
+    _, rows = run('summary', source)
+    assert rows[0]['data']['level'] == level
+    assert bool(rows[0]['data'].get('notes')) == note
+    assert [(r['event'], r['state']) for r in rows] == [(r['event'], r['state']) for r in default_level]
+zero = WORK / 'level-zero'
+actual = subprocess.run([str(BINARY), 'summary', str(source)],
+                        env=dict(ENV, FLATTRACE_DIR=str(zero), FLATTRACE_LEVEL='0', FLATTRACE_TRACEPARENT='invalid'), capture_output=True)
+assert (actual.returncode, actual.stdout, actual.stderr) == (baseline.returncode, baseline.stdout, baseline.stderr)
+assert not zero.exists()
+ENV.pop('FLATTRACE_LEVEL')
 # Seed a missing end and a missing command event: checker must reject both.
 valid = next(TRACES.glob('*.jsonl')).read_text().splitlines()
 for label, lines in [('unfinished', valid[:-1]),

@@ -268,7 +268,37 @@ their dependencies is conservative collection, not an evaluation of the scene.
 
 Missing-link counts describe referencing sites/chains, not unique absent IDs.
 `list` retains its conservative EXIT 2/no-listing policy for `missing_id`;
-`trace`/`pack` expose typed details. Missing physical assets and libraries now also refuse `list` with EXIT 2 and a typed stderr error before any listing. This corrects misleading success, without changing the existing JSON dependency-map or full-info shape. Trace remains the detailed inventory; no partial-list protocol is introduced.
+`trace`/`pack` expose typed details. In 1.2.0 and 1.3.0, missing physical assets/libraries also refused before any listing. The explicitly ruled 1.3.1 contract correction below replaces that missing-physical-file behaviour.
+
+## 1.3.1 incomplete listing contract
+
+Missing physical assets/libraries no longer suppress the listing. `list` prints
+all discovered existing members and the resolved absent declarations, then keeps
+EXIT 2 and the typed `missing_asset`/`missing_library` stderr error. Text marks
+absent members with ` [missing]`. Incomplete `--json` output is an object with
+`complete:false` and `files`, an owner map of arrays of
+`{"path":"MEMBER","missing":true|false}` records. Paths keep the same byte-safe
+encoding as successful lists. Missing sequence/glob/UDIM expansions keep the
+resolved declaration, not invented frames. Incomplete `--full-info` adds
+`complete:false` and uses these member records in `files`, retaining `usages`
+and `packed`. Saved override references in selected library IDs retain their
+physical source-library declarations in `list`; the overridden source asset
+graph is not expanded, and `trace`/`pack` selection is unchanged. Unrelated
+unused Library headers remain excluded. Unknown dependencies inside absent
+libraries cannot be listed.
+
+This introduces a partial-list protocol only where previous versions emitted
+no stdout. Successful lists keep their existing string-array map/full-info
+shape and EXIT 0 when all discovered members exist. Correctness fixes can expose
+additional dependencies; no existing successful JSON field changes type.
+Missing linked IDs, unreadable/corrupt files and incomplete pointer traces still
+refuse with no listing. Output delivery failure still takes precedence over a
+missing-file result. Consumers must retain stdout, stderr and exit together.
+
+Environment flattrace writers now honour `FLATTRACE_LEVEL`: 0 disables trace
+I/O, unset/empty defaults to 1, ASCII digits select a `u64`, and invalid/overflow
+values use 1 with a run-start note. Run-start `data.level` records the effective
+level. Oxblend emits the same events at 1 and 2; no events are debug-only.
 
 ## Additive usability fields
 

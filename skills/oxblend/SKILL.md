@@ -3,7 +3,7 @@ name: oxblend
 description: "Inspects saved Blender files and their dependencies with Oxblend. Use when summarizing a .blend, finding missing files, packing for a render farm, comparing versions, repathing an image or reading EXR header values without starting Blender."
 ---
 
-# Oxblend 1.3.0
+# Oxblend 1.3.1
 
 Copyright (c) 2026 Mario Hawat. CC BY 4.0:
 https://creativecommons.org/licenses/by/4.0/ . Software is MIT.
@@ -52,8 +52,8 @@ run() {
 run version --version
 ```
 All commands have `COMMAND --help`; `oxblend skill` prints this guide offline.
-Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.3.0/docs/USAGE.md)
-and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.3.0/docs/STABILITY.md).
+Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.3.1/docs/USAGE.md)
+and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.3.1/docs/STABILITY.md).
 These links are not installed files. Examples below use `run`; substitute actual inputs.
 Capture the producer before filtering: a closed stdout now exits 2 with
 `broken_pipe`, not success. Pipelines can hide that producer status unless the
@@ -86,7 +86,7 @@ run dependencies trace scene.blend
 run existing list scene.blend --json
 ```
 Start here, not with `inspect`/`library-facts`. Use `trace` as the declared
-reference inventory; `list` is an expanded existing-file view. After retaining
+reference inventory; `list` expands existing files and marks missing physical declarations. After retaining
 both exits, extract saved reports with **python3**, not an assumed `python`:
 ```sh
 python3 - <<'PY'
@@ -95,11 +95,19 @@ t = json.load(open("dependencies.stdout"))
 print("traversal", t["complete"], "missing sites", t["missing_path_count"])
 for u in t["usages"]:
     print(u["resolved_path"] or "hex:" + u["resolved_path_hex"], u["exists"])
-# Values are member arrays; keys identify owning blend files.
-if int(open("existing.exit").read()) == 0:
+# Successful output is the original owner map of string arrays.
+# Missing-file output is an envelope with explicit per-member availability.
+from pathlib import Path
+if Path("existing.stdout").stat().st_size:
     f = json.load(open("existing.stdout"))
-    members = sorted({p for paths in f.values() for p in paths})
-    print("expanded members", len(members), *members, sep="\n")
+    if int(open("existing.exit").read()) == 0:
+        members = sorted({p for paths in f.values() for p in paths})
+        print("expanded members", len(members), *members, sep="\n")
+    else:
+        assert f["complete"] is False
+        for owner, members in f["files"].items():
+            for member in members:
+                print(owner, member["path"], "MISSING" if member["missing"] else "present")
 else:
     print("list refused: use trace's declared references and errors above")
 PY
@@ -118,8 +126,17 @@ file; directories count as present. UDIM members are spatial **tiles**, not
 animation frames. Tile expansion proves no animation-sequence coverage; check
 required tiles and frames separately.
 Unused saved linked stubs are conservatively traced/packed, not proven render needs.
-Missing assets/libraries make `list` exit 2 with a typed stderr error and no listing;
-missing IDs/incomplete traversal also refuse. Use trace for full missing details.
+Since 1.3.1, missing physical assets/libraries print the full discovered listing
+and exit 2 with a typed stderr error. Text appends ` [missing]`; incomplete JSON
+is `{"complete":false,"files":{"OWNER":[{"path":"MEMBER","missing":false},
+{"path":"ABSENT","missing":true}]}}`. Full-info retains `usages`/`packed`, adding
+`complete:false` and the same member records. Successful JSON shape is unchanged.
+Saved override references in selected library IDs retain their physical source
+libraries in `list`, without expanding the overridden source asset graph;
+`trace`/`pack` selection and unused-header exclusion are unchanged.
+Missing expansions retain their resolved declaration/pattern; absent libraries'
+unknown contents cannot be discovered. Missing IDs, unreadable/corrupt files and
+incomplete pointer traversal still refuse with no listing. Use trace for details.
 Only trace/list accept `--low-memory`; it trades CPU/IO/temp disk for lower memory,
 not a memory ceiling. `source-facts` answers per-file collection/object/library
 closure; `library-facts` answers library collection/object discovery. Neither is a
@@ -252,6 +269,9 @@ The latter contains structured `argv` (UTF-8 or null) and exact native-byte
 command help; field/type/index refusals point to `inspect FILE` (fact-closure
 refusals to `trace FILE`). Suggestions never execute automatically.
 Set `FLATTRACE_DIR` to retain local flattrace v1 diagnostics; unset/empty is off.
+`FLATTRACE_LEVEL=0` also means no trace I/O. Unset/empty defaults to 1; trimmed
+ASCII digits select a u64, invalid/overflow uses 1 plus a run note. Run-start
+`data.level` records it. Levels 1 and 2 emit the same Oxblend events.
 `FLATTRACE_TRACEPARENT` joins an enclosing span. Sink failure warns once without
 changing the command result. Killed runs stay unfinished. Old phase/read-report
 variables are removed. Export and review traces before sharing: they contain paths.

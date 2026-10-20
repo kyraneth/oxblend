@@ -17,7 +17,7 @@ Keep inputs read-only. Use new output names; never overwrite inputs or merge a p
 - `source-facts`: inspect per-file source facts.
 - `library-facts`: inspect per-file library facts.
 - `trace`: discover dependencies and report incomplete traversal.
-- `list`: list existing expanded dependencies; use trace for missing-ID detail.
+- `list`: list expanded dependencies, marking missing physical declarations (exit 2); use trace for missing-ID detail.
 - `blocks`: inspect block sizes and pointer referrers.
 - `overrides`: inspect serialized overrides without evaluating them.
 - `diff`: compare allocations/content without guessing unresolved identity.

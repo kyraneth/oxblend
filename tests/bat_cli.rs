@@ -246,6 +246,33 @@ fn serialized_text_preserves_usage_order_json_sorts_dependency_members() {
     assert_eq!(value[src.to_str().unwrap()], serde_json::json!([a, z]));
 }
 #[test]
+fn missing_declaration_inside_a_listed_directory_keeps_its_text_marker() {
+    let w = Work::new();
+    let src = fixture(&w.0, &[(b"//assets", 1), (b"//assets/missing.png", 1)]);
+    std::fs::create_dir(w.0.join("assets")).unwrap();
+    let existing = w.0.join("assets/present.png");
+    let missing = w.0.join("assets/missing.png");
+    std::fs::write(&existing, []).unwrap();
+    let text = cli(&["list"], &[&src]);
+    assert_eq!(text.status.code(), Some(2));
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(
+        text.contains(&format!("    {} [missing]", missing.display())),
+        "{text}"
+    );
+    assert!(text.contains(&format!("    {}", existing.display())));
+    let json = cli(&["list", "--json"], &[&src]);
+    assert_eq!(json.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(report["complete"], false);
+    assert_eq!(
+        report["files"][src.to_str().unwrap()],
+        serde_json::json!([
+            {"path":missing,"missing":true}, {"path":existing,"missing":false}
+        ])
+    );
+}
+#[test]
 fn list_groups_hash_and_options_before_input() {
     let w = Work::new();
     let src = fixture(&w.0, &[(b"//asset.png", 1)]);
