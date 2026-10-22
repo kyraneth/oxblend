@@ -1,7 +1,5 @@
-// Vendored from flattrace v1 (MIT), https://github.com/kyraneth/flattrace, crates/flattrace/src/lib.rs.
-// Copyright (c) 2026 flattrace contributors. MIT; see flattrace-LICENSE.
-// Product adapter: warn/level parser visibility only; upstream tests live in the format repo.
-// Keep upstream writer logic intact; project Clippy style is not a fork.
+// Vendored flattrace writer (MIT); checked against the upstream writer by
+// scripts/check-writer-drift.py. Only level parser/warning visibility is adapted.
 #![allow(
     dead_code,
     clippy::manual_is_multiple_of,
@@ -24,7 +22,8 @@ pub const LEVEL_ENV: &str = "FLATTRACE_LEVEL";
 pub(super) fn level_from_env() -> (u64, Option<String>) {
     let raw = std::env::var_os(LEVEL_ENV).unwrap_or_default();
     let raw = raw.to_string_lossy();
-    let raw = raw.trim();
+    // Unicode White_Space plus information separators: Python's str.strip set.
+    let raw = raw.trim_matches(|c: char| c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}'));
     if raw.is_empty() {
         return (1, None);
     }
@@ -38,22 +37,33 @@ pub(super) fn level_from_env() -> (u64, Option<String>) {
 }
 static WARNED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 pub(super) fn warn(error: &io::Error) {
+    warn_text(&format!("tracing disabled: {error}"));
+}
+pub(super) fn warn_text(message: &str) {
     let pid = std::process::id();
     if WARNED.swap(pid, std::sync::atomic::Ordering::Relaxed) != pid {
-        let _ = writeln!(io::stderr(), "flattrace: tracing disabled: {error}");
+        let _ = writeln!(io::stderr(), "flattrace: {message}");
     }
 }
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 fn id(bytes: usize) -> io::Result<String> {
-    // W3C trace/span ID widths; OS entropy on Linux.
-    let mut source = File::open("/dev/urandom")?;
+    read_id(&mut File::open("/dev/urandom")?, bytes)
+}
+fn read_id(source: &mut impl Read, bytes: usize) -> io::Result<String> {
+    // W3C trace/span ID widths; OS entropy on Linux, never a userspace PRNG.
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut raw = vec![0u8; bytes];
     loop {
-        let mut raw = vec![0u8; bytes];
         source.read_exact(&mut raw)?;
         if raw.iter().any(|v| *v != 0) {
-            return Ok(raw.iter().map(|b| format!("{b:02x}")).collect());
+            let mut value = String::with_capacity(bytes * 2);
+            for byte in raw {
+                value.push(HEX[(byte >> 4) as usize] as char);
+                value.push(HEX[(byte & 15) as usize] as char);
+            }
+            return Ok(value);
         }
     }
 }
@@ -143,6 +153,21 @@ pub fn set_number(data: &mut Value, key: &str, value: f64) -> io::Result<()> {
     data[key] = json!(value);
     Ok(())
 }
+// The same masking set as Python; regexes compile only once, on first argv use.
+static CREDENTIALS: std::sync::LazyLock<[regex::Regex; 5]> = std::sync::LazyLock::new(|| {
+    // Python re.I also folds dotted/dotless i. Python's word set is L/N/underscore;
+    // its whitespace set adds the four information separators to Unicode White_Space.
+    let name = r"(?:token|password|passwd|secret|ap[iİı][-_]?key|access[-_]?key|key)";
+    let space = r"\s\x1c-\x1f";
+    let boundary = r"(^|[^\p{L}\p{N}_])";
+    [
+        format!(r"(?i)^-*{name}$"),
+        format!(r"(?i){boundary}(Author[iİı]zat[iİı]on[{space}]*:[{space}]*)(?:Bearer|Bas[iİı]c)[{space}]+[^{space},;]+"),
+        format!(r"(?i)(https?://)[^/{space}:@]+:[^/{space}@]+@"),
+        format!(r#"(?i){boundary}({name}[{space}]*[=:][{space}]*)(?:"[^"]*"|'[^']*'|[^{space},;&]+)"#),
+        format!(r#"(?i)(-+{name}[{space}]+)(?:"[^"]*"|'[^']*'|[^{space},;]+)"#),
+    ].map(|pattern| regex::Regex::new(&pattern).expect("static credential pattern"))
+});
 pub fn sanitize_argv(argv: Vec<String>) -> Vec<String> {
     let mut hide_next = false;
     argv.into_iter()
@@ -151,26 +176,26 @@ pub fn sanitize_argv(argv: Vec<String>) -> Vec<String> {
                 hide_next = false;
                 return "<redacted>".into();
             }
-            let (name, assigned) = match value.split_once('=') {
-                Some((k, _)) => (k, true),
-                None => (value.as_str(), false),
-            };
-            let normalized = name
-                .trim_start_matches('-')
-                .replace('_', "-")
-                .to_ascii_lowercase();
-            if matches!(
-                normalized.as_str(),
-                "token" | "password" | "passwd" | "secret" | "api-key" | "access-key" | "key"
-            ) {
-                if assigned {
+            let rules = &*CREDENTIALS;
+            if let Some((name, _)) = value.split_once('=') {
+                if rules[0].is_match(name) {
                     return format!("{name}=<redacted>");
                 }
-                hide_next = true;
             }
-            value
+            hide_next = rules[0].is_match(&value);
+            let value = rules[1].replace_all(&value, "${1}${2}<redacted>");
+            let value = rules[2].replace_all(&value, "${1}<redacted>@");
+            let value = rules[3].replace_all(&value, "${1}${2}<redacted>");
+            rules[4].replace_all(&value, "${1}<redacted>").into_owned()
         })
         .collect()
+}
+fn object_data(data: Value) -> Value {
+    if data.is_object() {
+        data
+    } else {
+        json!({"value":data, "notes":["non-object data wrapped in value"]})
+    }
 }
 
 pub struct Writer {
@@ -185,6 +210,7 @@ pub struct Writer {
     pid: u32,
     seq: u64,
     level: u64,
+    random: File,
     active: BTreeMap<String, (String, Option<String>, Instant)>,
 }
 impl Writer {
@@ -224,9 +250,7 @@ impl Writer {
             Some(v) if !v.is_empty() => std::path::PathBuf::from(v),
             _ => return Ok(None),
         };
-        if !data.is_object() {
-            return Err(invalid("data must be an object"));
-        }
+        data = object_data(data);
         data["level"] = json!(level);
         if let Some(note) = note {
             add_note(&mut data, &note);
@@ -282,9 +306,7 @@ impl Writer {
         run: String,
         best_effort: bool,
     ) -> io::Result<Self> {
-        if !data.is_object() {
-            return Err(invalid("data must be an object"));
-        }
+        data = object_data(data);
         let (trace, parent, flags) = match std::env::var(CONTEXT_ENV) {
             Ok(v) => context(&v)?,
             Err(std::env::VarError::NotPresent) => (id(16)?, None, "00".into()),
@@ -308,6 +330,7 @@ impl Writer {
             seq: 0,
             level: 1,
             active: BTreeMap::new(),
+            random: File::open("/dev/urandom")?,
         };
         let root = w.root.clone();
         data["argv"] = json!(sanitize_argv(argv));
@@ -334,9 +357,7 @@ impl Writer {
             self.file = None;
             return Ok(());
         }
-        if !data.is_object() {
-            return Err(invalid("data must be an object"));
-        }
+        let data = object_data(data);
         if let Some(e) = &error {
             if !e.is_object() || !e["kind"].is_string() || !e["message"].is_string() {
                 return Err(invalid("error requires string kind and message"));
@@ -402,7 +423,8 @@ impl Writer {
         if !self.active.contains_key(&parent) {
             return Err(invalid("inactive parent"));
         }
-        self.begin(event, data, Some(parent), id(8)?)
+        let span = read_id(&mut self.random, 8)?;
+        self.begin(event, data, Some(parent), span)
     }
     pub fn point(
         &mut self,
@@ -419,21 +441,37 @@ impl Writer {
             if !self.active.contains_key(&self.root) {
                 return Ok(());
             }
-            if !data.is_object() {
-                return Err(invalid("data must be an object"));
-            }
+            data = object_data(data);
             data["late_span"] = json!(span);
             add_note(&mut data, "point after span end");
             span = self.root.clone();
         }
-        let (_, parent, _) = self
+        let parent = self
             .active
             .get(&span)
             .ok_or_else(|| invalid("inactive span"))?
+            .1
             .clone();
         self.emit(event, "point", &span, parent.as_deref(), data, None, error)
     }
     pub fn end(
+        &mut self,
+        span: &str,
+        outcome: &str,
+        data: Value,
+        error: Option<Value>,
+    ) -> io::Result<()> {
+        if span == self.root {
+            let message = "run root can only end through finish()";
+            if !self.best_effort {
+                return Err(invalid(message));
+            }
+            warn_text(message);
+            return Ok(());
+        }
+        self.end_span(span, outcome, data, error)
+    }
+    fn end_span(
         &mut self,
         span: &str,
         outcome: &str,
@@ -461,7 +499,7 @@ impl Writer {
         if self.active.keys().any(|span| span != &self.root) {
             return Err(invalid("local spans still active"));
         }
-        self.end(&self.root.clone(), outcome, json!({}), None)
+        self.end_span(&self.root.clone(), outcome, json!({}), None)
     }
     // Dropping a writer closes the file without inventing an end.
 }

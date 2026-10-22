@@ -1,3 +1,34 @@
+# Oxblend 1.3.3
+
+## Correctness: paths and tracing
+
+- Centralized serialized Blender path interpretation, preserving sequencer `//`
+  and matching native I/O for extra slashes and serialized backslash separators.
+  Native CLI input filenames keep literal POSIX backslashes.
+  Foreign Windows drive/UNC paths carry explicit unverified-I/O warnings;
+  unsafe relocation refuses before publication rather than guessing.
+- Pointer-array `get` returns all entries. Sequence expansion preserves literal
+  glob characters in existing folders. File outputs reject trailing separators
+  and retain ordinary input permissions. List/blocks reject nonregular inputs
+  before opening them.
+- Dependency walks now have per-file summaries and detailed selection, edge and
+  asset phases. Pack summaries stay at level 1; member/fetch detail is level 2.
+  Fetch causality uses explicit links. Metadata includes version and git SHA.
+- Added stable in-process `tracing::{initialize, Span, Outcome}`. Initialization
+  is once per process, opt-in and best-effort; cancellation is explicit and
+  partial reports remain distinct from successful publication.
+- Writer errors skip the failed call instead of discarding the whole run.
+  Vendored writer is synchronized with upstream; an offline drift gate compares
+  the complete writer body and detects a deliberately mutated copy.
+- Qualification explicitly degrades without GNU time, uses current Clippy's
+  preferred key sort, and generates deterministic notices independent of cached
+  unbuilt target crates. Pack-sequence recipes cover cross-sequence shared
+  assets and completeness per selected root.
+- Licence qualification handles repeated dependency nodes without shell glob
+  expansion; the existing licence allowlist is unchanged.
+- Public source and crate exports include the build-identity script and all
+  public qualification helpers, plus a versioned changelog.
+
 # Oxblend 1.3.2
 
 - Precisely qualified absent ID references in linked libraries now produce

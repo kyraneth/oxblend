@@ -1163,7 +1163,7 @@ pub fn trace_overrides(root: &Path, options: OverrideOptions) -> Result<Override
             .map_err(|e| Error::new("io", e.to_string()))?
             .join(root)
     };
-    let path = resolve(&path, raw(&path).as_slice());
+    let path = crate::trace::lexical(&path);
     let reader = BlendFile::open(&path)?;
     let mut ctx = Context {
         options,

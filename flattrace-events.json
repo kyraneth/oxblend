@@ -202,7 +202,11 @@
     },
     "pack.execute": {
       "kind": "span",
-      "fields": {}
+      "fields": {
+        "files": "planned member count",
+        "published_files": "published member count",
+        "archive_written": "ZIP publication observed (boolean)"
+      }
     },
     "pack.copy": {
       "kind": "span",
@@ -226,7 +230,8 @@
       "kind": "span",
       "fields": {
         "path": "source path",
-        "blend": "decode blend capture (boolean)"
+        "blend": "decode blend capture (boolean)",
+        "links": "submission causality links (trace/span IDs, relationship submitted_by); may refer to ended spans"
       }
     },
     "snapshot": {
@@ -276,6 +281,32 @@
         "open_index_ms": "open/index residence milliseconds",
         "query_ms": "post-open query residence milliseconds",
         "complete": "traversal complete (boolean)"
+      }
+    },
+    "walk.file": {
+      "kind": "span",
+      "fields": {
+        "path": "owning blend path",
+        "selected": "linked-ID selection rather than root census (boolean)",
+        "visited": "new visited records inclusive of nested library walks (count)",
+        "usages": "total usages accumulated so far (count)",
+        "complete": "trace completeness (boolean)"
+      }
+    },
+    "walk.select": {
+      "kind": "span",
+      "fields": {}
+    },
+    "walk.edges": {
+      "kind": "span",
+      "fields": {
+        "seeds": "seed records (count)"
+      }
+    },
+    "walk.assets": {
+      "kind": "span",
+      "fields": {
+        "owners": "asset owner records (count)"
       }
     }
   },

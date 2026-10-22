@@ -244,15 +244,26 @@ impl BlendFile {
         let field = location.field;
         let base = location.offset;
         let indexed = location.indexed;
+        let count = if indexed { 1 } else { field.array_len };
         if field.pointer {
-            return Ok(Value::Pointer(self.primitive(
-                block_index,
-                base,
-                self.header.pointer_size,
-            )?));
+            let one = |index| {
+                self.primitive(
+                    block_index,
+                    add(base, mul(index, self.header.pointer_size)?)?,
+                    self.header.pointer_size,
+                )
+                .map(Value::Pointer)
+            };
+            return if count == 1 {
+                one(0)
+            } else {
+                (0..count)
+                    .map(one)
+                    .collect::<Result<Vec<_>>>()
+                    .map(Value::Array)
+            };
         }
         let kind = self.schema.types[field.type_index].as_slice();
-        let count = if indexed { 1 } else { field.array_len };
         if kind == b"char" && field.element_size != 1 {
             return Err(Error::new("invalid_sdna", "char width/TLEN mismatch"));
         }

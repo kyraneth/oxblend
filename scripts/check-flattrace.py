@@ -66,12 +66,15 @@ run('payload', source, scene, events=('file.open', 'index'))
 run('list', source, '--json', events=('file.open', 'index', 'reader.stats'))
 run('blocks', source, events=('file.open', 'index'))
 run('diff', source, source, events=('file.open', 'index'))
+ENV['FLATTRACE_LEVEL'] = '2'
 for command in ['pack', 'pack-sequence']:
     args = [source, WORK / command] if command == 'pack' else [source, '-t', WORK / command]
     run(command, *args, '-p', WORK, events=('pack.plan', 'pack.execute', 'pack.repath', 'write', 'publish'))
+ENV.pop('FLATTRACE_LEVEL')
 run('pack', source, WORK / 'dry-run', '-p', WORK, '--dry-run', events=('pack.plan',))
 assert not (WORK / 'dry-run').exists()
 run('pack', source, WORK / 'archive.zip', '-p', WORK, events=('write', 'publish'))
+ENV['FLATTRACE_LEVEL'] = '2'
 for command, spec, flag in [('edit', {'schema': 2, 'writes': [], 'bits': []}, '--spec'),
                             ('rewrite', {'schema': 1, 'edits': []}, '--edits')]:
     spec_path = WORK / (command + '.json')
@@ -80,6 +83,7 @@ for command, spec, flag in [('edit', {'schema': 2, 'writes': [], 'bits': []}, '-
     if command == 'edit':
         args += ['--mode', 'format-only']
     run(command, *args, events=('file.open', 'index', 'write', 'publish'))
+ENV.pop('FLATTRACE_LEVEL')
 # Hand-authored public EXR header; no pixels or native process.
 header = bytearray(struct.pack('<II', 20000630, 2))
 def attr(name, kind, value):

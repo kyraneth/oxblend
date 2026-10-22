@@ -54,6 +54,8 @@ pub struct PackReport {
     pub files: Vec<PackFile>,
     pub rewrites: Vec<EditReport>,
     pub missing: Vec<Usage>,
+    /// Absolute declarations intentionally left unchanged by --relative-only.
+    pub skipped_absolute_paths: Vec<Usage>,
     /// Unselected copied-library paths retained verbatim, never write admission.
     pub unrelocated_unselected_paths: Vec<Usage>,
     /// Guarded pointer-clear plan; publication is reported by each owning file.
@@ -102,7 +104,7 @@ impl PackReport {
             .filter(|v| v["kind"] == "missing_library")
             .count();
         crate::value::with_text(
-            json!({"schema":1,"operation":"pack","input_path_hex":raw_hex(&self.input),"legacy_input_trace_scope":"first-root-only","input_paths_hex":self.inputs.iter().map(|p|raw_hex(p)).collect::<Vec<_>>(),"root_traces":self.inputs.iter().zip(&self.root_traces).map(|(p,t)|json!({"input_path_hex":raw_hex(p),"trace":t.json()})).collect::<Vec<_>>(),"keep_hierarchy":self.keep_hierarchy,"directory_path_hex":raw_hex(&self.directory),"planning_complete":self.planning_complete,"directory_created":self.directory_created,"noop":self.noop,"compression_requested":self.compressed,"archive":self.archive,"archive_written":self.archive_written,"archive_entry_paths_not_filesystem_paths":self.archive,"complete":self.complete,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"trace":self.trace.json(),"files":self.files.iter().map(|f|json!({"input_path_hex":raw_hex(&f.input),"output_path_hex":raw_hex(&f.output),"output_written":f.output_written,"durability_completed":f.durability_completed,"rewritten":f.rewritten})).collect::<Vec<_>>(),"rewrites":self.rewrites.iter().map(EditReport::json).collect::<Vec<_>>(),"library_pointer_clears":self.library_pointer_clears,"missing_links":links,"missing_link_counts":{"missing_id":missing_ids,"missing_library":missing_libraries},"missing":self.missing.iter().map(|u| { let mut v=u.json(); v["absolute_path_hex"]=json!(raw_hex(&crate::trace::resolve(&bytes_path(&u.owner_file), &u.asset_path))); v }).collect::<Vec<_>>(),"warnings":self.unrelocated_unselected_paths.iter().map(|u| { let r=u.path_full_field.as_ref().or(u.path_dir_field.as_ref()).expect("unrelocated path has field provenance"); json!({"kind":"unrelocated_unselected_path","owner_file_hex":hex(&u.owner_file),"owner_file":std::str::from_utf8(&u.owner_file).ok(),"block_address":u.block_address.to_string(),"id_name_hex":hex(&u.block_name),"id_name":std::str::from_utf8(&u.block_name).ok(),"field_path_hex":r.path.iter().map(|p|hex(p)).collect::<Vec<_>>(),"field_path":r.path.iter().map(|p|std::str::from_utf8(p).ok()).collect::<Option<Vec<_>>>(),"asset_path_hex":hex(&u.asset_path),"asset_path":std::str::from_utf8(&u.asset_path).ok()}) }).collect::<Vec<_>>(),"pack_info":self.info_path.as_ref().map(|p|json!({"output_path_hex":raw_hex(p),"output_written":self.info_written,"durability_completed":self.info_durability_completed})),"errors":self.errors.iter().map(|e|json!({"kind":e.kind,"message":e.message})).collect::<Vec<_>>()}),
+            json!({"schema":1,"operation":"pack","input_path_hex":raw_hex(&self.input),"legacy_input_trace_scope":"first-root-only","input_paths_hex":self.inputs.iter().map(|p|raw_hex(p)).collect::<Vec<_>>(),"root_traces":self.inputs.iter().zip(&self.root_traces).map(|(p,t)|json!({"input_path_hex":raw_hex(p),"trace":t.json()})).collect::<Vec<_>>(),"keep_hierarchy":self.keep_hierarchy,"directory_path_hex":raw_hex(&self.directory),"planning_complete":self.planning_complete,"directory_created":self.directory_created,"noop":self.noop,"compression_requested":self.compressed,"archive":self.archive,"archive_written":self.archive_written,"archive_entry_paths_not_filesystem_paths":self.archive,"complete":self.complete,"durability":self.durability.as_str(),"durability_mechanism":self.durability.mechanism(),"syncfs_shared_filesystem":self.durability == Durability::End,"durability_completed":self.durability_completed,"trace":self.trace.json(),"files":self.files.iter().map(|f|json!({"input_path_hex":raw_hex(&f.input),"output_path_hex":raw_hex(&f.output),"output_written":f.output_written,"durability_completed":f.durability_completed,"rewritten":f.rewritten})).collect::<Vec<_>>(),"rewrites":self.rewrites.iter().map(EditReport::json).collect::<Vec<_>>(),"library_pointer_clears":self.library_pointer_clears,"missing_links":links,"missing_link_counts":{"missing_id":missing_ids,"missing_library":missing_libraries},"skipped_absolute_paths":self.skipped_absolute_paths.iter().map(Usage::json).collect::<Vec<_>>(),"missing":self.missing.iter().map(|u| { let mut v=u.json(); v["absolute_path_hex"]=json!(raw_hex(&crate::trace::resolve_usage(u))); v }).collect::<Vec<_>>(),"warnings":self.unrelocated_unselected_paths.iter().map(|u| { let r=u.path_full_field.as_ref().or(u.path_dir_field.as_ref()).expect("unrelocated path has field provenance"); json!({"kind":"unrelocated_unselected_path","owner_file_hex":hex(&u.owner_file),"owner_file":std::str::from_utf8(&u.owner_file).ok(),"block_address":u.block_address.to_string(),"id_name_hex":hex(&u.block_name),"id_name":std::str::from_utf8(&u.block_name).ok(),"field_path_hex":r.path.iter().map(|p|hex(p)).collect::<Vec<_>>(),"field_path":r.path.iter().map(|p|std::str::from_utf8(p).ok()).collect::<Option<Vec<_>>>(),"asset_path_hex":hex(&u.asset_path),"asset_path":std::str::from_utf8(&u.asset_path).ok()}) }).collect::<Vec<_>>(),"pack_info":self.info_path.as_ref().map(|p|json!({"output_path_hex":raw_hex(p),"output_written":self.info_written,"durability_completed":self.info_durability_completed})),"errors":self.errors.iter().map(|e|json!({"kind":e.kind,"message":e.message})).collect::<Vec<_>>()}),
         )
     }
 }
@@ -385,7 +387,7 @@ fn wildcard_members(path: &Path) -> Result<Vec<PathBuf>> {
                     pending.push((base.join(name), index, ancestors.clone()));
                 }
             }
-        } else if magic(pattern) {
+        } else if magic(pattern) && !base.join(&parts[index]).exists() {
             for name in scan_directory(&base)? {
                 if name.as_bytes().starts_with(b".") && !pattern.starts_with(b".") {
                     continue;
@@ -494,10 +496,10 @@ pub(crate) fn expand(path: &Path, sequence: bool) -> Result<Vec<PathBuf>> {
         pattern.extend(suffix);
         return wildcard_members(&parent.join(bytes_path(&pattern)));
     }
-    if star_pattern(raw) {
+    let concrete = asset_metadata(path).ok().filter(|m| m.is_file()).is_some();
+    if star_pattern(raw) && !concrete {
         return wildcard_members(path);
     }
-    let concrete = asset_metadata(path).ok().filter(|m| m.is_file()).is_some();
     match stem_pattern(&filename) {
         Some((prefix, suffix)) if concrete => {
             let mut pattern = prefix;
@@ -515,7 +517,7 @@ pub(crate) fn expand(path: &Path, sequence: bool) -> Result<Vec<PathBuf>> {
 fn member_base(path: &Path) -> PathBuf {
     let mut literal_prefix = PathBuf::new();
     for part in path.components() {
-        if magic(part.as_os_str().as_bytes()) {
+        if magic(part.as_os_str().as_bytes()) && !literal_prefix.join(part.as_os_str()).exists() {
             return literal_prefix;
         }
         literal_prefix.push(part.as_os_str());
@@ -702,7 +704,7 @@ fn overview(
     let missing = report
         .missing
         .iter()
-        .map(|usage| crate::trace::resolve(&bytes_path(&usage.owner_file), &usage.asset_path))
+        .map(crate::trace::resolve_usage)
         .collect::<BTreeSet<_>>();
     let links = report.missing_links();
     // Publication is not finished yet, so report.complete is not authoritative
@@ -736,6 +738,15 @@ fn overview(
             format!(
                 "{}: {link}\n",
                 link["kind"].as_str().unwrap_or("missing_link")
+            )
+            .as_bytes(),
+        );
+    }
+    for usage in &report.skipped_absolute_paths {
+        text.extend(
+            format!(
+                "Unrelocated absolute path (--relative-only): {}\n",
+                usage.json()
             )
             .as_bytes(),
         );
@@ -869,6 +880,7 @@ fn pack_inner(
         files: Vec::new(),
         rewrites: Vec::new(),
         missing: Vec::new(),
+        skipped_absolute_paths: Vec::new(),
         unrelocated_unselected_paths: Vec::new(),
         library_pointer_clears: Vec::new(),
         info_path: None,
@@ -924,12 +936,21 @@ fn pack_inner(
         let mut missing_indexes = BTreeSet::new();
         for (index, usage) in usages.iter().enumerate() {
             let data = &usage.asset_path;
-            let source = crate::trace::resolve(&bytes_path(&usage.owner_file), data);
-            if excluded(&source, &options.exclude)
-                || (options.relative_only && !data.starts_with(b"//"))
-            {
+            let source = crate::trace::resolve_usage(usage);
+            if options.relative_only && !data.starts_with(b"//") {
+                report.skipped_absolute_paths.push(usage.clone());
                 missing_indexes.insert(index);
                 continue;
+            }
+            if excluded(&source, &options.exclude) {
+                missing_indexes.insert(index);
+                continue;
+            }
+            if crate::trace::uncertain_path(data) {
+                return Err(Error::new(
+                    "path_resolution_unverified",
+                    "Foreign Windows-root loader I/O cannot be safely relocated; no outputs; inspect path_resolution_unverified trace warnings",
+                ));
             }
             let members = match expand(&source, usage.is_sequence) {
                 Ok(members) => members,
@@ -1062,11 +1083,11 @@ fn pack_inner(
             for (_, usage) in usages.iter().enumerate().filter(|(i, u)| {
                 !missing_indexes.contains(i) && bytes_path(&u.owner_file) == *owner
             }) {
-                let source = crate::trace::resolve(owner, &usage.asset_path);
+                let source = crate::trace::resolve_usage(usage);
                 let asset = assets
                     .get(&source)
                     .ok_or_else(|| unsafe_path("usage asset missing plan"))?;
-                if crate::trace::resolve(final_owner, &usage.asset_path) == asset.target {
+                if crate::trace::resolve_usage_at(usage, final_owner) == asset.target {
                     continue;
                 }
                 let (reference, mut replacement) = if let Some(f) = &usage.path_full_field {
@@ -1148,7 +1169,7 @@ fn pack_inner(
                     {
                         continue;
                     }
-                    let source = crate::trace::resolve(owner, &usage.asset_path);
+                    let source = crate::trace::resolve_usage(usage);
                     if excluded(&source, &options.exclude) {
                         continue;
                     }
@@ -1257,7 +1278,7 @@ fn pack_inner(
     // Deduplicate by resolved path; retain the first referencing block.
     let mut missing_paths = BTreeSet::new();
     for usage in &report.missing {
-        let path = crate::trace::resolve(&bytes_path(&usage.owner_file), &usage.asset_path);
+        let path = crate::trace::resolve_usage(usage);
         if missing_paths.insert(path.clone()) {
             report.errors.push(Error::new(
                 if usage.block_code == b"LI" {
@@ -1324,7 +1345,8 @@ fn pack_inner(
     } else {
         Durability::None
     };
-    let execution_span = crate::diagnostics::Span::new("pack.execute", json!({}));
+    let mut execution_span =
+        crate::diagnostics::Span::new("pack.execute", json!({"files":report.files.len()}));
     let execution = (|| {
         if !archive && destination_empty(&directory)? {
             let creation = create_directories(&directory, options.durability);
@@ -1349,7 +1371,8 @@ fn pack_inner(
                 .parent()
                 .ok_or_else(|| unsafe_path("file destination parent"))?;
             create_directories(parent, options.durability)?;
-            let mut member_span = crate::diagnostics::Span::new(
+            let mut member_span = crate::diagnostics::Span::at_level(
+                2,
                 if file.blend {
                     "pack.repath"
                 } else {
@@ -1453,6 +1476,7 @@ fn pack_inner(
         report.durability_completed = options.durability != Durability::None;
         Ok(())
     })();
+    execution_span.data(json!({"files":report.files.len(),"published_files":report.files.iter().filter(|f| f.output_written).count(),"archive_written":report.archive_written}));
     match execution_span.result(execution) {
         Ok(()) => {
             report.complete =

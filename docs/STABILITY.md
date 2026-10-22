@@ -107,7 +107,7 @@ error kinds. Source: production `Error::new`/edit-failure construction under
 | `missing_address`, `missing_asset`, `missing_field`, `missing_id`, `missing_input`, `missing_library` |
 | `name_collision`, `node_constructor`, `node_owner` |
 | `output_compression`, `output_decode_length`, `output_exists`, `output_path`, `overflow`, `owner_header`, `owner_projection` |
-| `pack_collision`, `pack_destination`, `pack_input`, `pack_origin`, `pack_path`, `pack_project`, `padding_write`, `path`, `path_context`, `path_nul`, `path_overflow`, `path_termination`, `pointer_count`, `pointer_depth`, `pointer_extent`, `pointer_path`, `pointer_proof`, `pointer_role`, `pointer_target_type`, `pointer_write`, `profile_discriminator`, `profile_field`, `profile_library`, `profile_linked`, `profile_mask`, `profile_owner`, `profile_temporal`, `property_collision`, `property_owner`, `property_selection`, `property_type` |
+| `pack_collision`, `pack_destination`, `pack_input`, `pack_origin`, `pack_path`, `pack_project`, `padding_write`, `path`, `path_context`, `path_nul`, `path_overflow`, `path_resolution_unverified`, `path_termination`, `pointer_count`, `pointer_depth`, `pointer_extent`, `pointer_path`, `pointer_proof`, `pointer_role`, `pointer_target_type`, `pointer_write`, `profile_discriminator`, `profile_field`, `profile_library`, `profile_linked`, `profile_mask`, `profile_owner`, `profile_temporal`, `property_collision`, `property_owner`, `property_selection`, `property_type` |
 | `raw_profile`, `record_extent`, `required_pointer_null`, `retained_removed`, `rlayers_source_id` |
 | `same_input`, `seek_table`, `serialization`, `sha256_width`, `snapshot_mismatch`, `socket_constructor`, `socket_owner`, `source_changed`, `spill_space`, `storage_profile`, `stray_data_run`, `string_nul`, `string_termination` |
 | `text_constructor`, `truncated`, `type`, `typed_kind`, `typed_overflow`, `typed_width` |
@@ -124,12 +124,12 @@ They are different current spellings, not interchangeable aliases.
 The crate root exposes `BlendFile`, `Header`, `Block`, `Error`, `Result`, and
 these modules (`src/lib.rs`): `bat_cli`, `diff`, `edit`,
 `exr_header`, `facts`, `file_ops`, `overrides`, `pack`, `schema`,
-`summary`, `trace`, `typed_edit`, `typed_spec`, `value`. **Stable in 1.x:** the root types and read-side modules `schema`, `value`,
-`trace`, `pack`, `diff`, `exr_header`, `facts`, `summary` and `overrides`.
+`summary`, `trace`, `tracing`, `typed_edit`, `typed_spec`, `value`. **Stable in 1.x:** the root types and read-side modules `schema`, `value`,
+`trace`, `tracing`, `pack`, `diff`, `exr_header`, `facts`, `summary` and `overrides`.
 `summary::summarize(&BlendFile)` returns owned schema-1 `serde_json::Value`,
 reusing the supplied reader without reopening it.
 
-**Unstable/internal:** `bat_cli`, `edit`, `typed_edit`, `typed_spec` and `file_ops`. They are public for reuse, but their Rust signatures,
+**Unstable/internal:** `diagnostics`, `bat_cli`, `edit`, `typed_edit`, `typed_spec` and `file_ops`. They are public for reuse, but their Rust signatures,
 types and behavior may change in minor releases without a semver guarantee;
 rustdoc flags this boundary. Structural editing planned for 1.1 may reshape
 these construction/editing APIs. Exception: `edit::EditOptions`,
@@ -271,6 +271,78 @@ Missing-link counts describe referencing sites/chains, not unique absent IDs.
 `list` retains its conservative EXIT 2/no-listing policy for `missing_id`;
 `trace`/`pack` expose typed details. In 1.2.0 and 1.3.0, missing physical assets/libraries also refused before any listing. The explicitly ruled 1.3.1 contract correction below replaces that missing-physical-file behaviour.
 
+## 1.3.3 path and library tracing contract
+
+Serialized Blender paths and native CLI input paths are separate domains.
+A native input filename's backslashes are literal POSIX bytes (including
+`overrides`). Serialized `//` and extra slashes after it resolve under the
+owning blend directory, matching native Image, Library and Sequencer I/O.
+Python's `bpy.path.abspath` alone is not equivalent to those loaders.
+Relative embedded backslashes are normalized as separators, matching native
+Image, Library and Sequencer I/O. Keep saved bytes for provenance; normalize
+only at this shared resolution boundary. Absolute POSIX paths containing
+backslashes follow the same proven native loader normalization. `Usage.asset_path` and its JSON
+`asset_path_hex` now retain the exact saved bytes (including backslashes),
+whereas `resolved_path` carries Blender's normalized dependency location.
+
+Foreign Windows drives follow Blender's Linux dependency mapping
+(`C:/assets/x` or backslash spelling → `/c/assets/x`); UNC retains its two
+leading backslashes and normalizes the remaining separators. Drive forms have
+dependency-walker evidence, not native I/O proof. UNC Image I/O was observed on
+Linux using a literal POSIX name relative to the process CWD, not a real network
+share; Library/Sequencer foreign mapping I/O remains unproven. Consequently UNC
+existence is CWD-dependent, and portable relocation is not certified. Trace adds
+`path_resolution_unverified` warnings with raw and resolved hex paths.
+List emits these warnings on stderr (also in full-info). Default pack refuses
+unverified foreign Windows-root relocation with the typed error of the same name,
+before publication, rather than guessing across loader/platform semantics.
+`--relative-only` leaves foreign absolute declarations unchanged and exposes
+`skipped_absolute_paths[]` plus pack-info lines. A restricted complete pack
+does not certify that skipped external dependencies are portable.
+
+`get` on an unindexed pointer array returns `Value::Array` / JSON array
+`items`, retaining every pointer in order. An indexed element remains a
+single pointer. Literal existing directory components take precedence over
+glob interpretation during sequence expansion. File outputs with a trailing
+slash refuse; outputs preserve the input's ordinary permission bits, not
+setuid/setgid/sticky bits. Missing/nonregular selected list/blocks inputs exit
+3 before an open that could block on a FIFO.
+
+### Stable in-process local tracing
+
+`oxblend::tracing::{initialize, Span, Outcome}` is stable in 1.x.
+`initialize()` reads `FLATTRACE_DIR`, `FLATTRACE_LEVEL` and
+`FLATTRACE_TRACEPARENT` exactly once per process, including a remembered
+no-op when disabled. It never mutates the environment. One process writer
+owns one run; process exit closes it with outcome `unknown`, since a library
+cannot infer the application's exit status. Per-call outcomes remain explicit. No implicit initialization occurs
+when merely opening a BlendFile. The CLI keeps its own entry/exit behavior.
+Do not use the internal `diagnostics` module as a stable API.
+
+`Span::new(name, serde_json::Value)` initializes idempotently and returns a
+non-Send/non-Sync synchronous per-call guard. Object attributes are recommended;
+other values are wrapped by the writer. `data(Value)` sets end attributes;
+`end(Outcome)` consumes the guard. Outcomes are `Ok`, `Error`, `Refused`,
+`Partial`, `Cancelled` and `Unknown`; the enum is non-exhaustive.
+Dropping without an explicit outcome records unknown, never fabricated success
+or cancellation. Partial means an incomplete returned report; inspect that
+report's completeness/publication fields. Cancelled requires an observed
+cooperative stop, not a missing end after a kill. Process abort/kill, inherited
+writers across fork and guards leaked past process exit cannot promise complete
+runs. Attributes are caller-owned data, not automatically redacted; review
+before sharing. Custom consumer event names need their own event inventory (or
+format-only flattrace checking), not the CLI-only inventory. Writer errors warn once through fallible stderr writes, skip the failed
+instrumentation call and never panic or fail the consumer. A permanently failed
+sink is owned by the writer and stops I/O, not the product.
+
+Run metadata includes version and git SHA (or explicit `unknown` in archives
+without a supplied build identity). Level 1 includes `walk.file` and
+`pack.execute` summaries. Level 2 adds walk selection/edge/asset phases,
+per-member pack spans and fetch spans. Descendants inherit detail levels.
+Fetch spans are rooted in the process run and carry `data.links` with
+trace/span IDs and `relationship: submitted_by`, which remains truthful when
+the submitting scope has already ended.
+
 ## 1.3.1 incomplete listing contract
 
 Missing physical assets/libraries no longer suppress the listing. `list` prints
@@ -299,7 +371,8 @@ missing-file result. Consumers must retain stdout, stderr and exit together.
 Environment flattrace writers now honour `FLATTRACE_LEVEL`: 0 disables trace
 I/O, unset/empty defaults to 1, ASCII digits select a `u64`, and invalid/overflow
 values use 1 with a run-start note. Run-start `data.level` records the effective
-level. Oxblend emits the same events at 1 and 2; no events are debug-only.
+level. In 1.3.1, levels 1 and 2 emitted the same events. The 1.3.3 detail-level
+contract above now distinguishes them.
 
 ## 1.3.2 linked-library compatibility
 

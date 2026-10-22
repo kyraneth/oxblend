@@ -13,8 +13,9 @@ Nonempty `FLATTRACE_DIR` creates a fresh per-run JSONL file, never overwrites.
 Unset/empty performs no trace I/O. `FLATTRACE_LEVEL=0` also disables all trace I/O,
 even with a directory set. Unset/empty level defaults to 1; trimmed ASCII digits
 select a `u64` level, and invalid/overflow values fall back to 1 with a run note.
-Run-start `data.level` records the effective level. Oxblend has no high-frequency
-events, so levels 1 and 2 emit the same events.
+Run-start `data.level` records the effective level. Level 1 attributes the walk
+per file and pack execution totals. Level 2 adds walk selection/edge/asset phases,
+per-member copy/repath and fetch detail; child spans inherit the detail level.
 Studio launchers can set it persistently;
 the public binary remains opt-in. Run data includes sanitized argv, tool
 version, binary SHA-256 when readable, OS, architecture and hostname; unknown
@@ -25,13 +26,14 @@ The tool-owned [event list](../flattrace-events.json) describes spans and data.
 CLI spans include argument parsing and complete stdout delivery; lower-level
 spans distinguish file open, index/schema, pack plan/copy/repath, stage writes
 and publication. `reader.stats` and `copy.stats` retain measured transport facts.
-Outcomes distinguish ok, error, refused, partial and unknown. Scope abandonment
+Outcomes distinguish ok, error, refused, partial, cancelled and unknown. Scope abandonment
 is unknown, not success; SIGKILL leaves missing ends, never a fabricated cancel
 or run completion. Durations are residence milliseconds, not CPU time; do not
 sum nested/overlapping spans. Flush is not crash durability.
 
-Sink failure warns once on stderr and disables tracing, without changing stdout
-or the command's exit status. Tracing itself holds one file descriptor;
+Writer-call errors warn once and skip that call; they do not discard the run.
+A failed sink stops trace I/O without changing stdout
+or the command's exit status. The writer holds its trace file and an OS-entropy descriptor;
 under an exhausted process FD limit it can reduce product resource headroom.
 Command/run `partial` means an incomplete report, not necessarily published
 files: inspect operation-span outcomes and publication fields separately.
@@ -52,8 +54,16 @@ upload, deletion, retention policy, viewer or collector is implied.
 Checker/export exit 1 retains unfinished evidence; it is not successful work.
 Command coverage requirements deliberately apply to early failures too;
 qualification separately verifies successful branches' lower-level spans.
-Library users do not implicitly activate a process writer; the CLI initializes
-the unstable diagnostic adapter.
+Library users opt in through stable `oxblend::tracing::initialize()` or
+`oxblend::tracing::Span::new(name, attributes)`. Initialization is idempotent and
+reads the FLATTRACE_* environment once without mutating it. Use
+`span.end(oxblend::tracing::Outcome::Ok)` (or Error/Refused/Partial/Cancelled/Unknown)
+for the actual per-call result. One process owns one run, ended at exit as
+`unknown`: a library cannot infer whether the host application succeeded.
+An un-ended guard drops as unknown; kill/abort remains unfinished. See
+[the stable tracing contract](STABILITY.md#stable-in-process-local-tracing).
+Build metadata contains version and git SHA; source archives without a supplied
+build identity explicitly record `unknown`.
 
 ## Exit status
 
@@ -224,6 +234,35 @@ ZIP is delivered: private staging, validated UTF-8 member names, ZIP64 widths, C
 - `each-file`: staged-file fsync before link, plus parent/created-ancestor fsync.
 
 A durability failure after publication can leave `output_written:true` and `complete:false`. Inspect before retrying.
+
+## Pack shots from several sequences
+
+Select the shots explicitly, even when they come from different sequence folders.
+Shared libraries, textures and caches are deduplicated in the resulting pack.
+Choose `-p` as the common project root explicitly: inference from the selected
+shot folders may omit the larger project context.
+
+```sh
+oxblend pack-sequence project/seq-a/shot-010.blend project/seq-b/shot-020.blend \
+  -t package-preview -p project --dry-run > plan.json 2> plan.stderr
+status=$?
+# Inspect the plan and retain this exit before creating a fresh destination.
+oxblend pack-sequence project/seq-a/shot-010.blend project/seq-b/shot-020.blend \
+  -t package-new -p project > pack.json 2> pack.stderr
+status=$?
+```
+
+Dry-run writes nothing; it is not publication. Never merge or resume a partially
+written destination. Read `root_traces[]`: each entry pairs an `input_path`
+(or authoritative `input_path_hex`) with that root's `trace`. The legacy
+top-level `trace` describes only the first root, not the whole selection.
+For **each** root inspect `trace.complete`, errors, warnings,
+`missing_path_count` and `referenced_paths_exist`; a clean first root cannot
+certify another shot. Then judge the whole pack's `planning_complete`,
+`complete`, `missing`, `missing_links`, errors, publication and durability.
+Exit 2 or any incomplete root is not farm-ready even when files were written.
+Reopen the isolated package in compatible Blender before delivery; serialized
+closure is not render or every-frame verification.
 
 ## Public Rust API
 

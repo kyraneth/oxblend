@@ -3,7 +3,7 @@ name: oxblend
 description: "Inspects saved Blender files and their dependencies with Oxblend. Use when summarizing a .blend, finding missing files, packing for a render farm, comparing versions, repathing an image or reading EXR header values without starting Blender."
 ---
 
-# Oxblend 1.3.2
+# Oxblend 1.3.3
 
 Copyright (c) 2026 Mario Hawat. CC BY 4.0:
 https://creativecommons.org/licenses/by/4.0/ . Software is MIT.
@@ -52,8 +52,8 @@ run() {
 run version --version
 ```
 All commands have `COMMAND --help`; `oxblend skill` prints this guide offline.
-Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.3.2/docs/USAGE.md)
-and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.3.2/docs/STABILITY.md).
+Optional extended references: [USAGE](https://github.com/kyraneth/oxblend/blob/v1.3.3/docs/USAGE.md)
+and [STABILITY](https://github.com/kyraneth/oxblend/blob/v1.3.3/docs/STABILITY.md).
 These links are not installed files. Examples below use `run`; substitute actual inputs.
 Capture the producer before filtering: a closed stdout now exits 2 with
 `broken_pipe`, not success. Pipelines can hide that producer status unless the
@@ -137,7 +137,7 @@ libraries in `list`, without expanding the overridden source asset graph;
 Missing expansions retain their resolved declaration/pattern; absent libraries'
 unknown contents cannot be discovered. Missing IDs, unreadable/corrupt files and
 incomplete pointer traversal still refuse with no listing. Use trace for details.
-Since 1.3.2, precisely qualified legacy node-group, copy-transforms and Object
+Since 1.3.3, precisely qualified legacy node-group, copy-transforms and Object
 driver ID slots in linked libraries can emit `library_null_pointer` warnings
 without incomplete traversal. Keep stderr: ordinary list emits structured
 warning envelopes there; full-info also includes `warnings`. Trace retains each
@@ -185,6 +185,42 @@ RNA property. Weak historical import/append sources and runtime-added bundled
 brush libraries are **not project dependencies**; classify them separately.
 Keep external Text declarations and report totals from the normalized final set.
 Native reopen alone is not render/evaluation proof.
+
+## Pack shots from several sequences
+
+Select the shots explicitly, even when they come from different sequence folders.
+Shared libraries, textures and caches are deduplicated in the resulting pack.
+Choose `-p` as the common project root explicitly: inference from the selected
+shot folders may omit the larger project context.
+
+```sh
+oxblend pack-sequence project/seq-a/shot-010.blend project/seq-b/shot-020.blend \
+  -t package-preview -p project --dry-run > plan.json 2> plan.stderr
+status=$?
+# Inspect the plan and retain this exit before creating a fresh destination.
+oxblend pack-sequence project/seq-a/shot-010.blend project/seq-b/shot-020.blend \
+  -t package-new -p project > pack.json 2> pack.stderr
+status=$?
+```
+
+Dry-run writes nothing; it is not publication. Never merge or resume a partially
+written destination. Read `root_traces[]`: each entry pairs an `input_path`
+(or authoritative `input_path_hex`) with that root's `trace`. The legacy
+top-level `trace` describes only the first root, not the whole selection.
+For **each** root inspect `trace.complete`, errors, warnings,
+`missing_path_count` and `referenced_paths_exist`; a clean first root cannot
+certify another shot. Then judge the whole pack's `planning_complete`,
+`complete`, `missing`, `missing_links`, errors, publication and durability.
+Exit 2 or any incomplete root is not farm-ready even when files were written.
+Reopen the isolated package in compatible Blender before delivery; serialized
+closure is not render or every-frame verification.
+
+Foreign Windows roots carry `path_resolution_unverified` warnings. Native
+loader behavior can differ from Python's `bpy.path.abspath`; use reported
+resolved bytes rather than that helper alone. Relative backslashes normalize
+as separators. Default pack refuses unsafe/unproven foreign-root relocation. `--relative-only` leaves foreign absolute
+paths unchanged: inspect `skipped_absolute_paths` and pack-info, and disclose
+those external dependencies. A restricted complete pack is not self-contained.
 
 ## Compare two versions
 ```sh
@@ -286,8 +322,13 @@ refusals to `trace FILE`). Suggestions never execute automatically.
 Set `FLATTRACE_DIR` to retain local flattrace v1 diagnostics; unset/empty is off.
 `FLATTRACE_LEVEL=0` also means no trace I/O. Unset/empty defaults to 1; trimmed
 ASCII digits select a u64, invalid/overflow uses 1 plus a run note. Run-start
-`data.level` records it. Levels 1 and 2 emit the same Oxblend events.
-`FLATTRACE_TRACEPARENT` joins an enclosing span. Sink failure warns once without
+`data.level` records it. Level 1 includes per-file dependency walks and a pack
+execution summary; level 2 adds walk phases, per-member writes/copies and fetch
+causality links. `partial` means a returned incomplete report, not a usable pack;
+`cancelled` is an observed cooperative stop, not a missing end after a kill.
+`FLATTRACE_TRACEPARENT` joins an enclosing span. Writer-call errors warn and skip
+that call; a failed sink stops trace I/O. Neither changes the command result.
+A sink failure warns once without
 changing the command result. Killed runs stay unfinished. Old phase/read-report
 variables are removed. Export and review traces before sharing: they contain paths.
 Preserve unknown kinds/added report fields; edit specs reject unknown keys.

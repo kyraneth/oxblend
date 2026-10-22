@@ -226,6 +226,12 @@ pub enum TraceWarning {
         owner_file: Vec<u8>,
         code: Vec<u8>,
     },
+    /// C dependency-walker interpretation; native loader I/O is not proven.
+    PathResolutionUnverified {
+        owner_file: Vec<u8>,
+        asset_path: Vec<u8>,
+        resolved_path: Vec<u8>,
+    },
 }
 impl TraceWarning {
     pub(crate) fn json(&self) -> Json {
@@ -247,6 +253,13 @@ impl TraceWarning {
                 library_chain,
             } => {
                 json!({"kind":"library_null_pointer","failure":failure.json(),"pointer_address":pointer_address.to_string(),"offset":offset,"library_chain_hex":library_chain.iter().map(|p|hex(p)).collect::<Vec<_>>(),"native_action":native_action,"pack_action":"clear_to_null"})
+            }
+            Self::PathResolutionUnverified {
+                owner_file,
+                asset_path,
+                resolved_path,
+            } => {
+                json!({"kind":"path_resolution_unverified","owner_file_hex":hex(owner_file),"asset_path_hex":hex(asset_path),"resolved_path_hex":hex(resolved_path),"reason":"foreign root follows native dependency semantics; portable relocation and loader-family I/O are not fully verified"})
             }
             Self::UnknownAssetCode { owner_file, code } => {
                 json!({"kind":"unknown_asset_code","owner_file_hex":hex(owner_file),"code_hex":hex(code)})
@@ -333,8 +346,44 @@ fn absolute_bytes(data: &[u8]) -> bool {
     (!data.starts_with(b"//") && data.starts_with(b"/"))
         || (data.len() >= 3 && data[0].is_ascii_alphabetic() && data[1] == b':' && data[2] == b'/')
 }
+/// Resolve serialized paths using Blender's native dependency semantics.
+/// Native Image/Library/Sequencer I/O normalizes embedded backslashes.
+/// Foreign roots use the C walker's mapping, flagged where portability is unproven.
 pub(crate) fn resolve(owner: &Path, data: &[u8]) -> PathBuf {
+    resolve_blender(owner, data)
+}
+fn windows_drive(data: &[u8]) -> bool {
+    data.len() >= 3
+        && data[0].is_ascii_alphabetic()
+        && data[1] == b':'
+        && matches!(data[2], b'/' | b'\\')
+}
+fn windows_root(data: &[u8]) -> bool {
+    windows_drive(data) || data.starts_with(b"\\\\")
+}
+pub(crate) fn uncertain_path(data: &[u8]) -> bool {
+    windows_root(data)
+}
+pub(crate) fn resolve_usage_at(usage: &Usage, owner: &Path) -> PathBuf {
+    resolve(owner, &usage.asset_path)
+}
+pub(crate) fn resolve_usage(usage: &Usage) -> PathBuf {
+    resolve_usage_at(usage, &path(&usage.owner_file))
+}
+fn resolve_blender(owner: &Path, data: &[u8]) -> PathBuf {
+    let unc = data.starts_with(b"\\\\");
     let data = normalize(data);
+    if windows_drive(&data) {
+        let mut mapped = vec![b'/', data[0].to_ascii_lowercase()];
+        mapped.extend_from_slice(&data[2..]);
+        return lexical(&path(&mapped));
+    }
+    if unc {
+        let tail = lexical(&path(&data[2..]));
+        let mut result = vec![b'\\', b'\\'];
+        result.extend(raw(&tail));
+        return path(&result);
+    }
     let p = if absolute_bytes(&data) {
         path(&data)
     } else {
@@ -342,7 +391,7 @@ pub(crate) fn resolve(owner: &Path, data: &[u8]) -> PathBuf {
             .parent()
             .unwrap_or(Path::new("/"))
             .join(path(if data.starts_with(b"//") {
-                &data[2..]
+                &data[2 + data[2..].iter().take_while(|&&b| b == b'/').count()..]
             } else {
                 &data
             }))
@@ -756,7 +805,7 @@ impl Context<'_> {
         {
             return Ok(());
         }
-        let asset = normalize(&asset);
+        // Keep saved bytes: normalizing here would erase UNC versus Blender //.
         let udim = seq && filename_tile(&asset);
         let si = self
             .file(v)
@@ -786,6 +835,15 @@ impl Context<'_> {
             path_dir_field: dir,
             path_base_field: base,
         };
+        if uncertain_path(&usage.asset_path) {
+            self.report
+                .warnings
+                .push(TraceWarning::PathResolutionUnverified {
+                    owner_file: usage.owner_file.clone(),
+                    asset_path: usage.asset_path.clone(),
+                    resolved_path: raw(&resolve_usage(&usage)),
+                });
+        }
         self.report.usages.push(usage);
         Ok(())
     }
@@ -1238,11 +1296,13 @@ impl Context<'_> {
         let Some(elem) = self.optptr(strip, &["stripdata"])? else {
             return Ok(());
         };
-        let mut dir = normalize(&self.bytes(strip, &["dir"])?);
-        while dir.last() == Some(&b'/') {
+        let mut dir = self.bytes(strip, &["dir"])?;
+        while dir.len() > 2 && dir.last() == Some(&b'/') {
             dir.pop();
         }
-        dir.push(b'/');
+        if !dir.ends_with(b"/") {
+            dir.push(b'/');
+        }
         dir.extend(self.bytes(elem, &["name"])?);
         let dir_field = self.field(strip, &["dir"])?;
         let base_field = self.field(elem, &["name"])?;
@@ -1750,6 +1810,29 @@ impl Context<'_> {
         names: Option<Vec<Vec<u8>>>,
         request_chain: Vec<Vec<u8>>,
     ) -> T<()> {
+        let mut span = crate::diagnostics::Span::new(
+            "walk.file",
+            json!({"path":self.files[fi].path.to_string_lossy(),"selected":names.is_some()}),
+        );
+        let before = self.visited.len();
+        let result = self.file_trace_inner(fi, names, request_chain);
+        span.data(json!({"visited":self.visited.len()-before,"usages":self.report.usages.len(),"complete":self.report.complete}));
+        span.end(if result.is_err() {
+            "error"
+        } else if !self.report.complete {
+            "partial"
+        } else {
+            "ok"
+        });
+        result
+    }
+    fn file_trace_inner(
+        &mut self,
+        fi: usize,
+        names: Option<Vec<Vec<u8>>>,
+        request_chain: Vec<Vec<u8>>,
+    ) -> T<()> {
+        let selection = crate::diagnostics::Span::at_level(2, "walk.select", json!({}));
         let reader = self.files[fi].reader.clone();
         let origin = View {
             file: fi,
@@ -1857,6 +1940,9 @@ impl Context<'_> {
                 element: 0,
             })
             .collect();
+        selection.end("ok");
+        let edges =
+            crate::diagnostics::Span::at_level(2, "walk.edges", json!({"seeds":queue.len()}));
         let mut local = BTreeSet::new();
         let mut libraries: BTreeMap<PathBuf, (View, BTreeSet<Vec<u8>>)> = BTreeMap::new();
         while let Some(v) = queue.pop_first() {
@@ -1896,6 +1982,15 @@ impl Context<'_> {
                 if target.is_empty() {
                     return Err(self.invalid(lib, &["name"], "linked library has empty path"));
                 }
+                if uncertain_path(&target) {
+                    self.report
+                        .warnings
+                        .push(TraceWarning::PathResolutionUnverified {
+                            owner_file: raw(&self.files[fi].path),
+                            asset_path: target.clone(),
+                            resolved_path: raw(&resolve(&self.files[fi].path, &target)),
+                        });
+                }
                 let target = resolve(&self.files[fi].path, &target);
                 libraries
                     .entry(target)
@@ -1930,6 +2025,9 @@ impl Context<'_> {
                 }
             }
         }
+        edges.end("ok");
+        let assets =
+            crate::diagnostics::Span::at_level(2, "walk.assets", json!({"owners":local.len()}));
         for v in local {
             if self.stopped {
                 break;
@@ -1942,6 +2040,7 @@ impl Context<'_> {
                 self.capture(*e);
             }
         }
+        assets.end("ok");
         // Observable diagnostics follow the saved Library header order, not
         // lexical filesystem order (the latter reorders error/warning arrays).
         let mut libraries: Vec<_> = libraries.into_iter().collect();
@@ -3096,7 +3195,7 @@ impl FieldReference {
 }
 impl Usage {
     pub fn json(&self) -> Json {
-        let resolved = resolve(&path(&self.owner_file), &self.asset_path);
+        let resolved = resolve_usage(self);
         let exists = resolved.is_dir()
             || crate::pack::expand(&resolved, self.is_sequence)
                 .is_ok_and(|members| !members.is_empty());

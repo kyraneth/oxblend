@@ -44,6 +44,7 @@ pub mod trace;
 mod trace_input;
 #[cfg(test)]
 mod trace_input_tests;
+pub mod tracing;
 /// Unstable/internal Rust API: may change in minor releases. CLI/JSON contracts are separate.
 pub mod typed_edit;
 /// Unstable/internal Rust API: may change in minor releases. CLI/JSON contracts are separate.

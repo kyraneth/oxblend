@@ -46,18 +46,20 @@ while IFS=$'\t' read -r spec declared; do
     case "$spec" in
         oxblend\ *) continue ;;
     esac
-    for token in $(printf '%s' "$declared" | sed 's/[()]//g; s/ OR / /g; s/ AND / /g'); do
+    # Read words as data: an unexpected token must never expand to CWD files.
+    read -r -a tokens <<< "$(printf '%s' "$declared" | sed 's/[()]//g; s/ OR / /g; s/ AND / /g')"
+    for token in "${tokens[@]}"; do
         if ! printf '%s\n' $allow | grep -qx -- "$token"; then
             printf 'licence: %s declares %s; deny.toml does not allow %s\n' \
                 "$spec" "$declared" "$token"
             failures=$((failures + 1))
         fi
     done
-done < <(cargo tree --offline --locked -e normal,build --prefix none --format '{p}|{l}' \
+done < <(cargo tree --offline --locked --no-dedupe -e normal,build --prefix none --format '{p}|{l}' \
     | sed 's/ ([^)]*)|/|/; s/|/\t/')
 
 if [ "$failures" -ne 0 ]; then
-    printf 'licence: %s package(s) outside the allow list\n' "$failures"
+    printf 'licence: %s licence identifier occurrence(s) outside the allow list\n' "$failures"
     exit 1
 fi
 printf 'licence: every built package is inside the deny.toml allow list\n'

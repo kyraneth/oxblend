@@ -20,7 +20,7 @@ struct Job {
     path: PathBuf,
     blend: bool,
     reply: mpsc::Sender<Result<Raw>>,
-    parent: Option<String>,
+    links: serde_json::Value,
 }
 #[derive(Default)]
 struct Queue {
@@ -143,8 +143,13 @@ impl Fetcher {
                                 queue = shared.wake.wait(queue).unwrap();
                             }
                         };
-                        let span = crate::diagnostics::Span::under("fetch", serde_json::json!({"path":job.path.to_string_lossy(),"blend":job.blend}), job.parent.as_deref());
-                        let result = span.result(fetch(&job.path, job.blend, &shared));
+                        let mut span = crate::diagnostics::Span::at_level(2, "fetch", serde_json::json!({"path":job.path.to_string_lossy(),"blend":job.blend,"links":job.links}));
+                        let result = fetch(&job.path, job.blend, &shared);
+                        if result.is_err() && shared.queue.lock().unwrap().closed {
+                            span.end("cancelled");
+                        } else {
+                            span.record_result(&result);
+                        }
                         let _ = job.reply.send(result);
                     }
                 })
@@ -167,7 +172,7 @@ impl Fetcher {
             path: path.to_path_buf(),
             blend,
             reply,
-            parent: crate::diagnostics::worker_parent(),
+            links: crate::diagnostics::worker_links(),
         };
         let mut queue = self.shared.queue.lock().unwrap();
         if blend {

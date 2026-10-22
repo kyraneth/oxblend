@@ -133,6 +133,12 @@ pub(crate) fn io(e: std::io::Error) -> Error {
     )
 }
 pub(crate) fn name(path: &Path) -> Result<CString> {
+    if path.as_os_str().as_bytes().ends_with(b"/") {
+        return Err(Error::new(
+            "output_path",
+            "file output has a trailing separator",
+        ));
+    }
     let value = path
         .file_name()
         .ok_or_else(|| Error::new("output_path", "output has no file name"))?;
@@ -212,7 +218,7 @@ impl AtomicOutput {
                 return Err(io(error));
             }
         };
-        Ok(Self {
+        let stage = Self {
             file,
             output: output.to_path_buf(),
             write_span: Some(crate::diagnostics::Span::new(
@@ -224,7 +230,13 @@ impl AtomicOutput {
             temp: Some(temp),
             published: false,
             durability_completed: false,
-        })
+        };
+        // Preserve the source's ordinary permission bits independent of umask;
+        // never propagate setuid/setgid/sticky bits to rewritten content.
+        if unsafe { libc::fchmod(stage.file.as_raw_fd(), source.mode() & 0o777) } < 0 {
+            return Err(io(std::io::Error::last_os_error()));
+        }
+        Ok(stage)
     }
     fn remove_temp(&mut self) -> Result<()> {
         if let Some(temp) = &self.temp {

@@ -66,7 +66,8 @@ impl PackInputs {
             value.check(path)?;
             return Ok(value.clone());
         }
-        let mut span = crate::diagnostics::Span::new(
+        let mut span = crate::diagnostics::Span::at_level(
+            2,
             "snapshot",
             serde_json::json!({"path":path.to_string_lossy()}),
         );

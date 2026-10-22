@@ -207,8 +207,11 @@ pub fn run(command: &str, args: &[OsString]) -> Result<()> {
         i += 1;
     }
     let input = input.ok_or_else(|| usage("list|blocks INPUT [options]"))?;
-    if !Path::new(input).exists() {
-        return Err(Error::new("missing_input", "selected blend input missing"));
+    if !Path::new(input).is_file() {
+        return Err(Error::new(
+            "missing_input",
+            "selected blend input missing or not a regular file",
+        ));
     }
     match command {
         "list" => listing(Path::new(input), &options),
@@ -263,7 +266,11 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
     // Keep the stable member-only stdout shape; native-null compatibility is
     // explicit on stderr even for ordinary (non-full-info) listings.
     for warning in &report.warnings {
-        if matches!(warning, trace::TraceWarning::LibraryNullPointer { .. }) {
+        if matches!(
+            warning,
+            trace::TraceWarning::LibraryNullPointer { .. }
+                | trace::TraceWarning::PathResolutionUnverified { .. }
+        ) {
             eprintln!(
                 "{}",
                 serde_json::json!({"schema":1,"warning":warning.json()})
@@ -288,7 +295,7 @@ fn listing(input: &Path, args: &[OsString]) -> Result<()> {
     let mut missing_error = None;
     for u in &report.usages {
         let owner = PathBuf::from(OsString::from_vec(u.owner_file.clone()));
-        let resource = trace::resolve(&owner, &u.asset_path);
+        let resource = trace::resolve_usage(u);
         let members = if resource.is_dir() {
             directories
                 .entry(owner.clone())
@@ -666,7 +673,7 @@ fn blocks(input: &Path, args: &[OsString]) -> Result<()> {
         groups[entry].1 = crate::checked::add(groups[entry].1, b.size)?;
         groups[entry].2.push(index);
     }
-    groups.sort_by(|a, b| b.1.cmp(&a.1));
+    groups.sort_by_key(|g| std::cmp::Reverse(g.1));
     println!("Block type                          Total Size Num blocks   Avg Size     Median");
     println!("----------------------------------- ---------- ---------- ---------- ----------");
     // A negative display limit uses the observed compatibility slice semantics:
