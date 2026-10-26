@@ -14,7 +14,9 @@ fn later_sink_failure_disables_without_failing_or_inventing_completion() {
         true,
     )
     .unwrap();
-    writer.file = Some(OpenOptions::new().write(true).open("/dev/full").unwrap());
+    // Inject a real write failure on our own local inode. A read-only FD is
+    // deterministic and needs no permission to a host-specific /dev/full.
+    writer.file = Some(File::open(&path).unwrap());
     writer.point("reader.stats", json!({}), None, None).unwrap();
     assert!(writer.file.is_none());
     writer.point("reader.stats", json!({}), None, None).unwrap();

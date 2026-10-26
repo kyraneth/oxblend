@@ -80,6 +80,7 @@ run clippy cargo clippy --offline --locked --all-targets -- -D warnings || exit 
 run fmt cargo fmt --all -- --check || exit $?
 run paths python3 scripts/check-paths.py || exit $?
 run trace-phases python3 scripts/check-trace-phases.py || exit $?
+run trace-structure python3 scripts/check-trace-structure.py "${CARGO_TARGET_DIR:-target}/release/oxblend" || exit $?
 run timer-fallback python3 scripts/test-qualify-time.py || exit $?
 run notices-cache python3 scripts/test-notices.py || exit $?
 # The malformed-input mutation and structure-aware sweep is a gate, not
@@ -92,6 +93,8 @@ run licence scripts/licence-gate.sh || exit $?
 run network scripts/no-network-check.sh || exit $?
 # The stability tables are inventories of the current source, not a second spec.
 run stability python3 scripts/check-stability.py || exit $?
+run guidance python3 scripts/generate-guidance.py --check --binary "${CARGO_TARGET_DIR:-target}/release/oxblend" || exit $?
+run report python3 scripts/test-report.py "${CARGO_TARGET_DIR:-target}/release/oxblend" || exit $?
 if [[ -n ${FLATTRACE_CHECKOUT:-} ]]; then
     run writer-drift python3 scripts/check-writer-drift.py || exit $?
     run flattrace python3 scripts/check-flattrace.py || exit $?

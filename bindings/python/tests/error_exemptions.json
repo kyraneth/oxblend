@@ -1,0 +1,1291 @@
+{
+  "schema": "oxblend.error-exemptions/v1",
+  "note": "Catalog-complete witness inventory exemptions. Each entry explains WHY the installed Python facade can never surface that catalog kind as its raised (terminal) exception kind, with proof snippets that occur verbatim in the listed checkout files (validated by error_inventory.validate_exemptions). Report-only kinds may still be observed inside a retained report; that observation is not a terminal witness and must not be counted as one. Stale entries (kind removed from catalog), witness/exemption overlap, and catalog kinds with neither witness nor exemption all fail the gate. No manual required-kind list; missing kinds are derived from the catalog.",
+  "exemptions": [
+    {
+      "kind": "broken_pipe",
+      "reason": "CLI-only stdout delivery failure. In this checkout the kind is constructed only where a std::io::Error from writing/delivering to a pipe or file is classified (edit_output::io, main::output_error, read_reports::io_kind_error); the CLI delivery owner is failure_receipt::stdout_counted in main::deliver_with_span. The installed in-process Python facade returns owned values/reports and never writes a report to a stdout pipe: operations return Record/report objects through _invoke, so no Python operation performs the stdout delivery whose BrokenPipe the CLI classifies. Fabricating a native constructor call would be false coverage.",
+      "proof": {
+        "files": [
+          "src/edit_output.rs",
+          "src/main.rs",
+          "src/read_reports.rs",
+          "bindings/python/python/oxblend/__init__.py"
+        ],
+        "snippets": [
+          "if e.kind() == std::io::ErrorKind::BrokenPipe {",
+          "if error.kind() == std::io::ErrorKind::BrokenPipe {",
+          "let mut out = oxblend::failure_receipt::stdout_counted(&mut bytes);",
+          "    try:\n        return fn(*args, **kwargs)"
+        ]
+      }
+    },
+    {
+      "kind": "closure_owner",
+      "reason": "Only Graph::import_with_compositor and Graph::verify emit this. Public graph path node_new imports the immutable KIT with destination=Some(tree owner); verify/decoded/write are not called by node_tree_edit, extract uses its own closure. No public owner-set constructor.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "                    .ok_or_else(|| {\n                        Error::new(\n                            \"closure_owner\",\n                            format!(\"direct data block {b} lacks included/destination owner\"),\n                        )",
+          "                && (!self.records[r.owner].alive || self.records[r.owner].code == *b\"DATA\")\n            {\n                return Err(Error::new(\"closure_owner\", format!(\"record {i}\")));\n            }\n            for p in &r.pointers {",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "conflicting_edits",
+      "reason": "Report-only in pack. coalesce's conflicting-rewrite refusal (pack.rs) is raised inside the pack planning closure whose failures are retained as PackReport errors entries; the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError through _admit for an incomplete pack report. The conflicting-rewrite refusal sits in the same planning closure (coalesce, called while planning rewrites) and is converted identically. The kind is therefore observable inside a retained PackReport, never as the raised Python exception kind.",
+      "proof": {
+        "files": [
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/__init__.py"
+        ],
+        "snippets": [
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          "return _admit(PackReport(report), IncompletePackError, \"pack\", allow_incomplete)",
+          "\"conflicting_edits\""
+        ]
+      }
+    },
+    {
+      "kind": "constructor_type",
+      "reason": "Graph::new_typed and property_check_name only. Public link_new constructs fixed bNodeLink only after compatible(KIT) byte-exact DNA; fixed type exists in immutable KIT. Property constructors have no CLI/Python entry. Arbitrary source DNA is rejected as kit_dna before new_typed.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "            .iter()\n            .position(|s| self.schema.schema().types[s.type_index] == b\"IDProperty\")\n            .ok_or_else(|| Error::new(\"constructor_type\", \"IDProperty\"))?;\n        let width = self.schema.schema().structs[si]\n            .fields",
+          "            .iter()\n            .position(|s| self.schema.schema().types[s.type_index] == ty.as_bytes())\n            .ok_or_else(|| Error::new(\"constructor_type\", ty))?;\n        let size = self.schema.schema().lengths[self.schema.schema().structs[sdna].type_index];\n        self.allocate(*b\"DATA\", sdna, 1, vec![0; size], owner)",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "        if dna(self.schema)? != dna(f)?\n            || self.schema.header().pointer_size != f.header().pointer_size\n            || self.schema.header().file_format != f.header().file_format\n        {\n            return Err(Error::new(\n                \"kit_dna\",\n                \"source and constructor DNA/container mismatch\","
+        ]
+      }
+    },
+    {
+      "kind": "crypto_retarget",
+      "reason": "Only import_with_compositor with Some(CompositorRetarget) emits it. Public node_new calls import wrapper passing None; all non-None calls are Rust tests/private factory, no JSON operation accepts a retarget plan.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "            for source in &plan.nodes {\n                let image = plan.image.ok_or_else(|| {\n                    Error::new(\"crypto_retarget\", \"planned Cryptomatte image missing\")\n                })?;\n                let node = *map.get(source).ok_or_else(|| {",
+          "                })?;\n                let node = *map.get(source).ok_or_else(|| {\n                    Error::new(\"crypto_retarget\", \"planned node is not in closure\")\n                })?;\n                self.ptr(node, &[\"id\"], Some(image))?;",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "crypto_scene_kept_edge",
+      "reason": "Only import_with_compositor Some(CompositorRetarget) branch; public node_new import wrapper always passes None; extract has independent traversal, not this helper.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "                    if plan.image.is_some() && target == plan.source_scene {\n                        return Err(Error::new(\n                            \"crypto_scene_kept_edge\",\n                            format!(\"block {b} {} still reaches Tech Scene\", p.path),\n                        ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "crypto_source_id",
+      "reason": "Only import_with_compositor Some(CompositorRetarget) branch; public node_new import wrapper always passes None; no public JSON retarget transport.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "                        if target != plan.source_scene {\n                            return Err(Error::new(\n                                \"crypto_source_id\",\n                                \"Cryptomatte ID is not the source Tech Scene\",\n                            ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "cycle",
+      "reason": "Report-only in trace (and query outcomes), never the raised terminal kind. TraceFailure::kind_str maps FailureKind::Cycle to the string cycle only for retained report entries; the single Error::new(\"cycle\") in src/trace.rs exists solely to attach diagnostic source evidence before that failure is captured into the report and is never returned. The CLI and Python trace terminals for such a file are incomplete_trace, and query terminals are incomplete_query. Observing cycle inside a retained report is not a terminal witness.",
+      "proof": {
+        "files": [
+          "src/trace.rs"
+        ],
+        "snippets": [
+          "FailureKind::Cycle => \"cycle\",",
+          "let error = Error::new(\"cycle\", failure.message.clone());"
+        ]
+      }
+    },
+    {
+      "kind": "declared_diff",
+      "reason": "Typed and structural publisher compare stage with emitted bytes or original+declared spans. Ordinary immutable inputs/specs do not control stage bytes independently; requires writer invariant/storage fault/concurrent mutation, not a reproducible safe user-input witness in practice.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/typed_edit.rs",
+          "src/node_tree_edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        crate::edit_decode::verify_output(&stage.file, family, s.reader().decompressed_len())?;\n    } else if stage.file.metadata().map_err(io)?.len() != s.reader().decompressed_len() as u64 {\n        return Err(Error::new(\"declared_diff\", \"raw output length changed\"));\n    }\n",
+          "            || reread.data.range(span.offset, span.bytes.len())?.as_ref() != span.bytes\n        {\n            return Err(Error::new(\"declared_diff\", \"unexpected staged bytes\"));\n        }\n        position = add(span.offset, span.bytes.len())?;",
+          "            .as_ref()\n    {\n        return Err(Error::new(\"declared_diff\", \"unexpected staged tail bytes\"));\n    }\n    let length = stage.file.metadata().map_err(io)?.len();",
+          "    if readback != data {\n        return Err(Error::new(\n            \"declared_diff\",\n            \"staged structural output differs\",\n        ));",
+          "            .ok_or_else(|| refusal(\"staged tree missing\"))?;\n        if describe(&g, tree)? != report[\"after\"] {\n            return Err(Error::new(\"declared_diff\", \"staged graph differs\"));\n        }\n        Ok(())",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "decoded_proof",
+      "reason": "Only Graph::write readback emits it. Public node_tree_edit publishes through its own publish; extract has its own publisher. Graph::write is used by private factory/Rust tests, not public CLI/Python.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        })?;\n        if check.read_decompressed_bytes()? != data {\n            return Err(Error::new(\"decoded_proof\", \"emitted bytes changed\"));\n        }\n        let census = super::checked_pointer_census(&check)?;",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "empty_clear",
+      "reason": "Only edit::validate emits this; prepared catches each field failure into EditReport.errors, public rewrite terminal incomplete_edit. No public direct validate call.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "    if edit.replacement_path.is_empty() {\n        return Err(Error::new(\n            \"empty_clear\",\n            \"clearing a reference is not this operation\",\n        ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "            Err(e) => errors.push(EditFailure {\n                edit_index: Some(index),\n                kind: e.kind,\n                message: e.message,\n            }),",
+          "                let edits = oxblend::rewrite_spec::parse(&value)?;\n                let durability = usage_durability(&durability)?;\n                let report = oxblend::edit::rewrite_paths(\n                    &input,\n                    &output,\n                    &edits,\n                    &oxblend::edit::EditOptions::new(durability),\n                )?;\n                Ok(report.json())",
+          "return _admit(EditReport(_invoke(_native.rewrite, _path(input), _path(output), _spec(edits), durability)), IncompleteEditError, 'edit', allow_incomplete"
+        ]
+      }
+    },
+    {
+      "kind": "expected_path",
+      "reason": "Only edit::validate; prepared catches per-field refusal into retained EditReport, public rewrite terminal incomplete_edit.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "    if bytes[..end] != edit.expected_path {\n        return Err(Error::new(\n            \"expected_path\",\n            \"stored path does not match expected old bytes\",\n        ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "            Err(e) => errors.push(EditFailure {\n                edit_index: Some(index),\n                kind: e.kind,\n                message: e.message,\n            }),",
+          "                let edits = oxblend::rewrite_spec::parse(&value)?;\n                let durability = usage_durability(&durability)?;\n                let report = oxblend::edit::rewrite_paths(\n                    &input,\n                    &output,\n                    &edits,\n                    &oxblend::edit::EditOptions::new(durability),\n                )?;\n                Ok(report.json())",
+          "return _admit(EditReport(_invoke(_native.rewrite, _path(input), _path(output), _spec(edits), durability)), IncompleteEditError, 'edit', allow_incomplete"
+        ]
+      }
+    },
+    {
+      "kind": "exr_header_truncated",
+      "reason": "Report-embedded, never a terminal reader kind. Both terminal reader paths call exr_header::read(), which remaps exr_header_truncated to exr_header (src/exr_header.rs); truncation survives only as an exr-scan per-file record with status header_truncated, whose terminal is incomplete_exr_scan or nothing. The installed Python exr_header path calls the same read(), so Python can observe the string only inside a retained scan record, never as its raised exception kind.",
+      "proof": {
+        "files": [
+          "src/exr_header.rs",
+          "src/exr_scan.rs"
+        ],
+        "snippets": [
+          "if e.kind == \"exr_header_truncated\" {",
+          "Error::new(\"exr_header\", s)",
+          "\"header_truncated\""
+        ]
+      }
+    },
+    {
+      "kind": "file_ops_profile",
+      "reason": "Only Graph::new little-endian guard. Only public Graph::new path is node_tree preserved after version(f) has required little-endian 64-bit format1 native521; extract never constructs Graph.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "    pub fn new(schema: &'a BlendFile) -> Result<Self> {\n        if !schema.header().little_endian {\n            return Err(Error::new(\"file_ops_profile\", \"little endian required\"));\n        }\n        schema.owner_index()?.admit_write(schema)?;",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "incomplete_read_batch",
+      "reason": "CLI-only command terminal. incomplete_read_batch is constructed only for the read-batch command's aggregate (src/read_batch.rs, driven from src/main.rs). The Python facade exposes per-query File.get/pointer and module get/pointer operations and has no batch operation at all: no binding source references a read-batch entry point (searched bindings/python/src and bindings/python/python, excluding the generated error-class table and bundled skill prose). A per-query Python failure therefore carries the single query's kind, never the batch aggregate.",
+      "proof": {
+        "files": [
+          "src/read_batch.rs",
+          "bindings/python/python/oxblend/operations.py",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "\"incomplete_read_batch\",",
+          "def get(path: HostPath, block: int, path_steps: Sequence[str | int], element: int = 0, *, raw: bool = False, byte_array: int | None = None, pointer_table: int | None = None) -> ValueReport:"
+        ]
+      }
+    },
+    {
+      "kind": "invalid_graph",
+      "reason": "Report-only in trace. TraceFailure::kind_str maps FailureKind::InvalidGraph to invalid_graph only for retained report entries in the trace/list/pack report; field and pointer faults are captured into the report and the raised terminal kind is incomplete_trace on both the CLI and the Python facade. No audited Python operation returns invalid_graph as its raised kind.",
+      "proof": {
+        "files": [
+          "src/trace.rs"
+        ],
+        "snippets": [
+          "FailureKind::InvalidGraph => \"invalid_graph\","
+        ]
+      }
+    },
+    {
+      "kind": "invalid_layout",
+      "reason": "Only overrides Context faults/OverrideFailureKind::InvalidLayout converted to report errors. trace_overrides returns Ok(report); public terminal incomplete_overrides.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/overrides.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        if source.block_code.len() != 2 || source.block_count != 1 {\n            return Err(Error::new(\n                \"invalid_layout\",\n                \"ID target must have a single native two-byte ID BHead record, not an opaque DATA chunk or array\",\n            ));",
+          "        let name = match self.id_value(v, \"name\")? {\n            Value::Bytes(v) => v,\n            _ => return Err(Error::new(\"invalid_layout\", \"ID name not bytes\")),\n        };\n        if name.len() < 2 {",
+          "        };\n        if name.len() < 2 {\n            return Err(Error::new(\"invalid_layout\", \"ID name lacks type prefix\"));\n        }\n        let library_address = match self.id_value(v, \"lib\")? {",
+          "        let library_address = match self.id_value(v, \"lib\")? {\n            Value::Pointer(v) => v,\n            _ => return Err(Error::new(\"invalid_layout\", \"ID.lib not pointer\")),\n        };\n        // Preserve declared library path even for a missing remote file. A corrupt",
+          "            .blocks()\n            .binary_search_by_key(&source.block_offset, |b| b.data_offset)\n            .map_err(|_| Error::new(\"invalid_layout\", \"non-null target lost\"))?;\n        if reader.blocks()[block].old_address != source.block_address {\n            return Err(Error::new(\"invalid_layout\", \"target provenance differs\"));",
+          "            .map_err(|_| Error::new(\"invalid_layout\", \"non-null target lost\"))?;\n        if reader.blocks()[block].old_address != source.block_address {\n            return Err(Error::new(\"invalid_layout\", \"target provenance differs\"));\n        }\n        Ok(View { file, block })",
+          "                let result = if target.block_code != b\"DATA\" {\n                    Err(Error::new(\n                        \"invalid_layout\",\n                        \"string target is not opaque DATA\",\n                    ))",
+          "                        .position(|&b| b == 0)\n                        .map(|end| b[..end].to_vec())\n                        .ok_or_else(|| Error::new(\"invalid_layout\", \"unterminated string target\"))\n                });\n                match result {",
+          "                message,\n            } => {\n                json!({\"state\":\"invalid_layout\",\"status\":\"unknown\",\"address_decimal\":address.to_string(),\"source\":source.as_ref().map(Provenance::json),\"message\":message})\n            }\n        }",
+          "            OverrideFailureKind::DanglingPointer => \"dangling_pointer\",\n            OverrideFailureKind::AmbiguousPointer => \"ambiguous_pointer\",\n            OverrideFailureKind::InvalidLayout => \"invalid_layout\",\n            OverrideFailureKind::MissingLibrary => \"missing_library\",\n            OverrideFailureKind::MissingId => \"missing_id\",",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "                Ok(oxblend::overrides::trace_overrides(&path, options)?.json())"
+        ]
+      }
+    },
+    {
+      "kind": "invalid_saved_structure",
+      "reason": "Report-embedded per-field query error, never the terminal kind. A null required collection/object relationship in view-layer controls is returned as invalid_saved_structure collected into report.errors (src/query/view_layers.rs); the terminal is always incomplete_query (src/main.rs). Python raises IncompleteQueryError.",
+      "proof": {
+        "files": [
+          "src/query/view_layers.rs",
+          "src/main.rs",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "\"invalid_saved_structure\",",
+          "\"incomplete_query\",",
+          "\"requested fields unavailable; all independent rows retained, inspect errors and each next_action\","
+        ]
+      }
+    },
+    {
+      "kind": "json",
+      "reason": "CLI-only stdout plumbing. The json kind is constructed only where the CLI serializes its list report for text delivery with serde_json::to_string_pretty (src/bat_cli.rs). The Python listing seam returns the owned report value to the facade without that serialization step, so no Python operation performs the failing conversion and none can surface this kind.",
+      "proof": {
+        "files": [
+          "src/bat_cli.rs"
+        ],
+        "snippets": [
+          "let pretty = serde_json::to_string_pretty(&value)"
+        ]
+      }
+    },
+    {
+      "kind": "library_read",
+      "reason": "Report-embedded, reclassified per-field query/trace error, never a standalone reader terminal. A linked-library capture failure is reclassified to library_read for an independent query field/body error (src/session_query.rs) and is a trace FailureKind; terminals are incomplete_query/incomplete_trace. Python observes it only inside a retained report, never as its raised kind.",
+      "proof": {
+        "files": [
+          "src/session_query.rs"
+        ],
+        "snippets": [
+          "\"library_read\"",
+          "BodyErr::Independent(error.reclassify(\"library_read\"))"
+        ]
+      }
+    },
+    {
+      "kind": "library_reader",
+      "reason": "Report-only interior kind, never a terminal public exception in either surface. OverrideFailure::json maps OverrideFailureKind::LibraryReader to the string library_reader only for a retained report entry (with reader_kind beside it); the overrides CLI terminal for an incomplete report is always incomplete_overrides, and the Python facade admits overrides only by raising IncompleteOverridesError via _admit. No terminal Error construction with kind library_reader exists in the audited call paths, so Python can observe this string only inside a retained OverrideReport, never as the raised exception kind. Counting that observation as a witness would be false coverage.",
+      "proof": {
+        "files": [
+          "src/overrides.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/operations.py",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "OverrideFailureKind::LibraryReader(_) => \"library_reader\",",
+          "\"incomplete_overrides\",",
+          "return _admit(OverrideReport(_invoke(_native.overrides, _path(path), recursive)), IncompleteOverridesError, 'overrides', allow_incomplete)"
+        ]
+      }
+    },
+    {
+      "kind": "link_owner",
+      "reason": "link_remove/new private guard. Public exact_link resolves membership and directions via endpoint; node_remove iterates actual tree links; link_new gets node/socket from checked endpoint. Wrong public endpoints refuse node_endpoint first.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        let links = self.list(tree, &[\"links\"])?;\n        if !links.contains(&link) {\n            return Err(Error::new(\"link_owner\", \"link not in tree\"));\n        }\n        let to = self.target(link, &[\"tosock\"])?;",
+          "        {\n            return Err(Error::new(\n                \"link_owner\",\n                \"socket directions or tree ownership\",\n            ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "linked_reference_only",
+      "reason": "Report-embedded per-field query error, never the terminal kind. A linked ID stub without external content is returned as linked_reference_only collected into report.errors (src/query.rs); the terminal is always incomplete_query (src/main.rs). Python raises IncompleteQueryError.",
+      "proof": {
+        "files": [
+          "src/query.rs",
+          "src/main.rs",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "\"linked_reference_only\",",
+          "\"incomplete_query\",",
+          "\"requested fields unavailable; all independent rows retained, inspect errors and each next_action\","
+        ]
+      }
+    },
+    {
+      "kind": "list_endpoints",
+      "reason": "Only roles::declared_intrusive_list_target emits this for fallback declarations. It is called only by trace walker which retains nested cause, public terminal incomplete_trace; pointer() checked roles does not use declared fallback.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/roles.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "    if first == 0 || last == 0 {\n        return Err(fail(\n            \"list_endpoints\",\n            \"non-null list site requires both endpoints\",\n        ));",
+          "    if previous != last {\n        return Err(fail(\n            \"list_endpoints\",\n            \"intrusive last endpoint differs from chain\",\n        ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "list_integrity",
+      "reason": "source_list only production caller is import_with_compositor isolated node import reading compiled immutable KIT. User source graph lists are read by Graph::list (list_cycle/list_symmetry/list_endpoint) or public pointer roles validator. Compiled KIT ordinary intrusive lists are fixed valid.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "    while let Some(id) = current {\n        if !seen.insert(id) || source_target(f, id, &[\"prev\"])? != previous {\n            return Err(Error::new(\"list_integrity\", \"source cycle/symmetry\"));\n        }\n        out.push(id);",
+          "    }\n    if previous != end {\n        return Err(Error::new(\"list_integrity\", \"source endpoint\"));\n    }\n    Ok(out)",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "list_reciprocity",
+      "reason": "Only roles::declared_intrusive_list_target emits this; only trace calls it, retaining nested diagnostic then strict incomplete_trace. Not a terminal pointer()/extract error.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/roles.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        if read(block, prev.offset)? != previous {\n            return Err(fail(\n                \"list_reciprocity\",\n                \"intrusive prev edge differs from predecessor\",\n            ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "missing_id",
+      "reason": "Report-only across trace/list/pack and query/facts. TraceFailure::kind_str maps FailureKind::MissingId to missing_id for retained report entries (with missing_link_counts/missing_links in list and pack reports); every audited terminal wrapper is incomplete_trace, incomplete_pack, incomplete_query or incomplete_facts. Unlike missing_library, a missing linked ID is not a listed member whose availability reclassifies the list terminal (verified against the fresh runtime: listing a missing-ID fixture is incomplete_trace on both surfaces).",
+      "proof": {
+        "files": [
+          "src/trace.rs",
+          "src/main.rs"
+        ],
+        "snippets": [
+          "FailureKind::MissingId => \"missing_id\",",
+          "let error = oxblend::pack::strict_pack_refusal(&report);"
+        ]
+      }
+    },
+    {
+      "kind": "node_owner",
+      "reason": "Only Graph::node_remove membership guard; public remove resolves node() uniquely from same tree list immediately before node_remove, no intervening tree-list mutation.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        let nodes = self.list(tree, &[\"nodes\"])?;\n        if !nodes.contains(&node) {\n            return Err(Error::new(\"node_owner\", \"not in tree\"));\n        }\n        self.set_list(",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "owner_projection",
+      "reason": "Only Graph::verify emits it, called by Graph::decoded/write. Public node_tree editor uses its own emit/publish verification; no public Graph::verify or caller-provided Graph records.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "            let read_index = *by_address\n                .get(&r.address)\n                .ok_or_else(|| Error::new(\"owner_projection\", \"missing DATA\"))?;\n            let expected = *by_address\n                .get(&self.records[r.owner].address)",
+          "            let expected = *by_address\n                .get(&self.records[r.owner].address)\n                .ok_or_else(|| Error::new(\"owner_projection\", \"missing owner\"))?;\n            if census.owners[read_index] != Some(expected) {\n                return Err(Error::new(",
+          "            if census.owners[read_index] != Some(expected) {\n                return Err(Error::new(\n                    \"owner_projection\",\n                    \"native namespace differs from structural transaction owner\",\n                ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "pack_collision",
+      "reason": "Report-only in pack. The member-collision refusal (pack.rs, planned-member mapping) is raised inside the pack planning closure whose failures are retained as PackReport errors entries; the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError through _admit for an incomplete pack report. Verified against the fresh runtime: a required asset named pack-info.txt colliding with the generated pack-info.txt yields a report entry of kind pack_collision while both surfaces raise incomplete_pack. The kind is therefore observable inside a retained PackReport, never as the raised Python exception kind.",
+      "proof": {
+        "files": [
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/__init__.py"
+        ],
+        "snippets": [
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          "return _admit(PackReport(report), IncompletePackError, \"pack\", allow_incomplete)",
+          "\"pack_collision\""
+        ]
+      }
+    },
+    {
+      "kind": "pack_destination",
+      "reason": "Report-only in pack. destination_empty's nonempty-destination refusal (pack.rs) is raised inside the pack planning closure whose failures are retained as PackReport errors entries; the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError through _admit for an incomplete pack report. Verified against the fresh runtime: packing into an existing nonempty directory yields a report entry of kind pack_destination while both surfaces raise incomplete_pack. The kind is therefore observable inside a retained PackReport, never as the raised Python exception kind.",
+      "proof": {
+        "files": [
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/__init__.py"
+        ],
+        "snippets": [
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          "return _admit(PackReport(report), IncompletePackError, \"pack\", allow_incomplete)",
+          "\"pack_destination\""
+        ]
+      }
+    },
+    {
+      "kind": "pack_origin",
+      "reason": "Report-only in pack. The saved-owner/field origin-matching refusal (pack.rs) is raised inside the pack planning closure whose failures are retained as PackReport errors entries; the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError through _admit for an incomplete pack report. The origin lookup failures sit in the same planning closure (src/pack.rs origin_block/field-origin sites) and are converted identically. The kind is therefore observable inside a retained PackReport, never as the raised Python exception kind.",
+      "proof": {
+        "files": [
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/__init__.py"
+        ],
+        "snippets": [
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          "return _admit(PackReport(report), IncompletePackError, \"pack\", allow_incomplete)",
+          "\"pack_origin\""
+        ]
+      }
+    },
+    {
+      "kind": "pack_path",
+      "reason": "Report-only in pack. The unsafe-path refusal for symlink/nonregular pack paths (pack.rs unsafe_path) is raised inside the pack planning closure whose failures are retained as PackReport errors entries; the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError through _admit for an incomplete pack report. Verified against the fresh runtime: packing to a symlink destination yields the pack_path report entry while both surfaces raise incomplete_pack. The kind is therefore observable inside a retained PackReport, never as the raised Python exception kind.",
+      "proof": {
+        "files": [
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/__init__.py"
+        ],
+        "snippets": [
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          "return _admit(PackReport(report), IncompletePackError, \"pack\", allow_incomplete)",
+          "\"pack_path\""
+        ]
+      }
+    },
+    {
+      "kind": "path_context",
+      "reason": "Only edit::import_path cyclic list error propagated through validate then caught by prepared; public rewrite terminal incomplete_edit.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "            while let Some(s) = socket {\n                if !seen.insert(s) {\n                    return Err(Error::new(\"path_context\", \"cyclic import input list\"));\n                }\n                if reader.get(s, 0, &steps(&[\"name\"]), true)? == Value::Bytes(b\"Path\".to_vec())",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "            Err(e) => errors.push(EditFailure {\n                edit_index: Some(index),\n                kind: e.kind,\n                message: e.message,\n            }),",
+          "                let edits = oxblend::rewrite_spec::parse(&value)?;\n                let durability = usage_durability(&durability)?;\n                let report = oxblend::edit::rewrite_paths(\n                    &input,\n                    &output,\n                    &edits,\n                    &oxblend::edit::EditOptions::new(durability),\n                )?;\n                Ok(report.json())",
+          "return _admit(EditReport(_invoke(_native.rewrite, _path(input), _path(output), _spec(edits), durability)), IncompleteEditError, 'edit', allow_incomplete"
+        ]
+      }
+    },
+    {
+      "kind": "path_nul",
+      "reason": "Only edit::validate; prepared catches per-field refusal into retained report, public rewrite terminal incomplete_edit.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "    if edit.replacement_path.contains(&0) || edit.expected_path.contains(&0) {\n        return Err(Error::new(\n            \"path_nul\",\n            \"path values must exclude embedded NUL\",\n        ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "            Err(e) => errors.push(EditFailure {\n                edit_index: Some(index),\n                kind: e.kind,\n                message: e.message,\n            }),",
+          "                let edits = oxblend::rewrite_spec::parse(&value)?;\n                let durability = usage_durability(&durability)?;\n                let report = oxblend::edit::rewrite_paths(\n                    &input,\n                    &output,\n                    &edits,\n                    &oxblend::edit::EditOptions::new(durability),\n                )?;\n                Ok(report.json())",
+          "return _admit(EditReport(_invoke(_native.rewrite, _path(input), _path(output), _spec(edits), durability)), IncompleteEditError, 'edit', allow_incomplete"
+        ]
+      }
+    },
+    {
+      "kind": "path_overflow",
+      "reason": "Only edit::validate; prepared catches per-field refusal into retained report, public rewrite terminal incomplete_edit.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "    if length > field.array_len {\n        return Err(Error::new(\n            \"path_overflow\",\n            \"replacement plus NUL exceeds fixed capacity; never truncate\",\n        ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "            Err(e) => errors.push(EditFailure {\n                edit_index: Some(index),\n                kind: e.kind,\n                message: e.message,\n            }),",
+          "                let edits = oxblend::rewrite_spec::parse(&value)?;\n                let durability = usage_durability(&durability)?;\n                let report = oxblend::edit::rewrite_paths(\n                    &input,\n                    &output,\n                    &edits,\n                    &oxblend::edit::EditOptions::new(durability),\n                )?;\n                Ok(report.json())",
+          "return _admit(EditReport(_invoke(_native.rewrite, _path(input), _path(output), _spec(edits), durability)), IncompleteEditError, 'edit', allow_incomplete"
+        ]
+      }
+    },
+    {
+      "kind": "path_resolution_unverified",
+      "reason": "Report-only in pack. The foreign-root relocation refusal (pack.rs) is raised inside the pack planning closure whose failures are retained as PackReport errors entries; the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError through _admit for an incomplete pack report. Foreign-root usages are additionally retained as trace warnings and skipped_items report entries with this kind while the pack terminal stays incomplete_pack. The kind is therefore observable inside a retained PackReport, never as the raised Python exception kind.",
+      "proof": {
+        "files": [
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/__init__.py"
+        ],
+        "snippets": [
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          "return _admit(PackReport(report), IncompletePackError, \"pack\", allow_incomplete)",
+          "\"path_resolution_unverified\""
+        ]
+      }
+    },
+    {
+      "kind": "path_termination",
+      "reason": "Only edit::validate; prepared catches per-field refusal into retained report, public rewrite terminal incomplete_edit.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "    let end = bytes.iter().position(|&v| v == 0).ok_or_else(|| {\n        Error::new(\n            \"path_termination\",\n            \"old path has no terminator within fixed field\",\n        )",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "            Err(e) => errors.push(EditFailure {\n                edit_index: Some(index),\n                kind: e.kind,\n                message: e.message,\n            }),",
+          "                let edits = oxblend::rewrite_spec::parse(&value)?;\n                let durability = usage_durability(&durability)?;\n                let report = oxblend::edit::rewrite_paths(\n                    &input,\n                    &output,\n                    &edits,\n                    &oxblend::edit::EditOptions::new(durability),\n                )?;\n                Ok(report.json())",
+          "return _admit(EditReport(_invoke(_native.rewrite, _path(input), _path(output), _spec(edits), durability)), IncompleteEditError, 'edit', allow_incomplete"
+        ]
+      }
+    },
+    {
+      "kind": "pointer_proof",
+      "reason": "Only Graph::write emits this final census proof refusal; no public caller invokes Graph::write, node_tree_edit/extract own separate emit/publish paths.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        if census.require_closed().is_err() {\n            return Err(Error::new(\n                \"pointer_proof\",\n                format!(\n                    \"output unresolved/ambiguous: {:?}\",",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "property_collision",
+      "reason": "Graph property constructors unreachable, BUT query/props.rs emits same kind for duplicate saved names inside retained unavailable query rows. Terminal public query kind incomplete_query, not property_collision.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/query/props.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "src/query.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "                if self.string(p, &[\"name\"])? == name {\n                    return Err(Error::new(\n                        \"property_collision\",\n                        crate::value::hex(name.as_bytes()),\n                    ));",
+          "                == name\n            {\n                return Err(Error::new(\"property_collision\", crate::value::hex(&name)));\n            }\n        }",
+          "                if entries.contains_key(&key) {\n                    return Err(Error::new(\n                        \"property_collision\",\n                        format!(\"duplicate IDProperty key {key:?}\"),\n                    ));",
+          "        if entries.contains_key(&key) {\n            return Err(Error::new(\n                \"property_collision\",\n                format!(\"duplicate IDProperty key {key:?}\"),\n            ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "                    Err(error) => {\n                        let error = if linked\n                            && concept != Some(\"collection.graph\")\n                            && error.kind == \"missing_field\"\n                        {\n                            Error::new(\n                                \"linked_reference_only\",\n                                \"linked ID is a root-file stub; the requested body field was not loaded\",\n                            )\n                        } else {\n                            error\n                        };\n                        errors.push(json!({\"kind\":error.kind,\"diagnostic_ref\":crate::failure_receipt::reference_json(error.diagnostic.get()),\"block_index\":record.block,\"element\":record.element,\"field\":field,\"message\":error.message}));\n                        let mut outcome = unavailable(&error, field, &record, type_name);\n                        if let Some(value) = partial_value {\n                            outcome[\"partial_value\"] = value;\n                        }\n                        values.insert(field.clone(), outcome);"
+        ]
+      }
+    },
+    {
+      "kind": "property_owner",
+      "reason": "Only property_insert; no public property constructor/insertion operation (query custom properties is read-only).",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        {\n            return Err(Error::new(\n                \"property_owner\",\n                \"detached owner-local property and group required\",\n            ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "property_selection",
+      "reason": "Only property_remove; no public property deletion transport.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        }\n        if selected.len() != 1 {\n            return Err(Error::new(\"property_selection\", \"requires one property\"));\n        }\n        let keep = properties",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "property_type",
+      "reason": "Only property_check_name used by private property constructors; public query malformed property type reports unprofiled_role instead.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        if let Some(group) = group {\n            if self.ty(group) != b\"IDProperty\" || self.value(group, &[\"type\"])? != 6 {\n                return Err(Error::new(\"property_type\", \"group required\"));\n            }\n            for p in self.list(group, &[\"data\", \"group\"])? {",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "query_cycle",
+      "reason": "Report-embedded per-field query error, never the terminal kind. A cyclic collection/graph edge is returned as a per-field Error::new(query_cycle) collected into report.errors with an unavailable row (src/query/access.rs); the command terminal constructed afterwards is always incomplete_query (src/main.rs), and the Python facade raises IncompleteQueryError. Observing query_cycle inside a retained report is not a terminal witness.",
+      "proof": {
+        "files": [
+          "src/query/access.rs",
+          "src/main.rs",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "return Err(Error::new(\"query_cycle\", format!(\"cycle in {path}\")));",
+          "\"incomplete_query\",",
+          "\"requested fields unavailable; all independent rows retained, inspect errors and each next_action\","
+        ]
+      }
+    },
+    {
+      "kind": "query_list",
+      "reason": "Report-embedded per-field query error, never the terminal kind. An inconsistent list predecessor/last-link is returned as Error::new(query_list) collected into report.errors (src/query/access.rs, src/query/compositor.rs); the terminal is always incomplete_query (src/main.rs). Python raises IncompleteQueryError, never a query_list terminal.",
+      "proof": {
+        "files": [
+          "src/query/access.rs",
+          "src/main.rs",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "\"query_list\",",
+          "\"incomplete_query\",",
+          "\"requested fields unavailable; all independent rows retained, inspect errors and each next_action\","
+        ]
+      }
+    },
+    {
+      "kind": "raw_profile",
+      "reason": "Graph::admit_raw is private and only called under if f.block(target)?.sdna_index == 0 in import_with_compositor; its sdna_index != 0 guard cannot be true for that immutable source target. No public raw-admission spec.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        if f.block(target)?.sdna_index != 0 {\n            return Err(Error::new(\n                \"raw_profile\",\n                \"raw admission needs an opaque allocation\",\n            ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "retained_removed",
+      "reason": "Only Graph::prune_owned emits it. No production public caller invokes prune_owned; node_tree editor explicitly retains orphan allocations and uses its own saved-referrer refusal node_graph.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "            if !r.alive {\n                return Err(Error::new(\n                    \"retained_removed\",\n                    \"kept pointer refers to removed record\",\n                ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "rlayers_source_id",
+      "reason": "Only import_with_compositor Some plan.clear_rlayers branch. Public node_new imports None; public extract clear policy is independent and cannot enter this code.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "                        if f.dna_type_id(target)? != b\"Scene\" {\n                            return Err(Error::new(\n                                \"rlayers_source_id\",\n                                \"planned Render Layers edge is not a Scene reference\",\n                            ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "seek_table",
+      "reason": "Internal fallback reason, never a terminal refusal. A seek-table/framing proof failure is caught by the reader and downgraded to checked full-streaming with a SeekTableFallback diagnostic (src/trace_input.rs); the constructor in src/seek_input.rs exists only to carry that fallback reason. No reader command returns seek_table as its raised kind.",
+      "proof": {
+        "files": [
+          "src/seek_input.rs",
+          "src/trace_input.rs"
+        ],
+        "snippets": [
+          "Error::new(\"seek_table\", s)",
+          "Err(e) if e.kind == \"seek_table\""
+        ]
+      }
+    },
+    {
+      "kind": "serialization",
+      "reason": "Internal invariant, unreachable in practice from user data. Every production site serializes an engine-owned, string-keyed serde_json::Value (CLI report delivery in src/main.rs, read-batch rows, the multi-root report). That serializer can only fail if the engine constructed a non-JSON value, which its own constructors never do; no user-controlled data reaches the serializer unmediated, so a user fixture cannot legitimately drive this kind.",
+      "proof": {
+        "files": [
+          "src/main.rs",
+          "src/read_batch.rs",
+          "src/multi_root.rs"
+        ],
+        "snippets": [
+          "Err(error) => return span.result(Err(Error::new(\"serialization\", error.to_string())))",
+          "serde_json::to_vec(value).map_err(|e| Error::new(\"serialization\", e.to_string()))?",
+          "serde_json::to_string(&value).map_err(|e| Error::new(\"serialization\", e.to_string()))?"
+        ]
+      }
+    },
+    {
+      "kind": "sha256_width",
+      "reason": "Unreachable in practice. The SHA-256 owner's checked length and bit-length multiplications (src/bat_cli.rs) overflow only for a single hashed message of at least 2^61 bytes. No input a user operation can actually supply approaches that width, and the check guards internal length accounting rather than any user-supplied spec boundary.",
+      "proof": {
+        "files": [
+          "src/bat_cli.rs"
+        ],
+        "snippets": [
+          ".ok_or_else(|| Error::new(\"sha256_width\", \"message length overflow\"))?",
+          ".ok_or_else(|| Error::new(\"sha256_width\", \"bit length overflow\"))?"
+        ]
+      }
+    },
+    {
+      "kind": "snapshot_mismatch",
+      "reason": "Rust snapshot identity guard only. Python native writers create one snapshot, typed_spec resolves every field against that snapshot, then write_plan receives same snapshot/plan. No exposed FieldRef/EditPlan Rust objects; JSON cannot select a snapshot identity.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/typed_edit.rs",
+          "src/file_ops/graph.rs",
+          "src/file_ops/operations.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "    if !std::ptr::eq(s, field.snapshot) {\n        return Err(Error::new(\n            \"snapshot_mismatch\",\n            \"field belongs to another immutable snapshot\",\n        ));",
+          "    if !std::ptr::eq(s, p.snapshot) {\n        return Err(Error::new(\n            \"snapshot_mismatch\",\n            \"plan belongs to another snapshot\",\n        ));",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;",
+          "                let snapshot = oxblend::typed_edit::snapshot(&input)?;\n                let plan = oxblend::typed_spec::plan(&snapshot, &value, selected)?;\n                let durability = usage_durability(&durability)?;\n                let report = oxblend::typed_edit::write_plan(\n                    &snapshot,\n                    &plan,"
+        ]
+      }
+    },
+    {
+      "kind": "socket_constructor",
+      "reason": "Only socket_new_pass and image_pass_index invoked by that socket constructor; no public JSON socket construction operation. add_node imports immutable KIT prototype, never calls socket_new_pass.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        502 => Ok(0),\n        _ => Err(Error::new(\n            \"socket_constructor\",\n            \"unqualified saved pass metadata version\",\n        )),",
+          "            \"NodeSocketFloat\" | \"NodeSocketColor\" | \"NodeSocketVector\" | \"NodeSocketVector4D\"\n        ) {\n            return Err(Error::new(\"socket_constructor\", \"unqualified output type\"));\n        }\n        let mut outputs = self.list(node, &[\"outputs\"])?;",
+          "            .ok_or_else(|| {\n                Error::new(\n                    \"socket_constructor\",\n                    format!(\"qualified native prototype missing: {kind}\"),\n                )",
+          "        let prototype_direction = super::uint(kit, prototype, &[\"in_out\"])?;\n        let layout = super::pointer_layout(kit, prototype)?\n            .ok_or_else(|| Error::new(\"socket_constructor\", \"socket pointer layout absent\"))?;\n        let value_slot = layout\n            .iter()",
+          "            .iter()\n            .find(|p| p.path == \"[0].default_value\")\n            .ok_or_else(|| Error::new(\"socket_constructor\", \"socket default slot absent\"))?;\n        let default = crate::file_ops::validate::site(\n            kit,",
+          "            super::uint(kit, prototype, &[\"default_value\"])?,\n        )?\n        .ok_or_else(|| Error::new(\"socket_constructor\", \"native socket default missing\"))?;\n        if matches!(kind, \"NodeSocketVector\" | \"NodeSocketVector4D\") {\n            let st = &kit.schema().structs[kit.block(default)?.sdna_index];",
+          "                .iter()\n                .find(|f| f.name == b\"value\")\n                .ok_or_else(|| Error::new(\"socket_constructor\", \"vector value absent\"))?;\n            let dimensions = if st.fields.iter().any(|f| f.name == b\"dimensions\") {\n                super::uint(kit, default, &[\"dimensions\"])?",
+          "            } else {\n                return Err(Error::new(\n                    \"socket_constructor\",\n                    \"vector dimensions unqualified\",\n                ));",
+          "            {\n                return Err(Error::new(\n                    \"socket_constructor\",\n                    format!(\"{prototype_kind} default dimensions {dimensions}, requested {wanted}\"),\n                ));",
+          "                .iter()\n                .position(|s| kit.schema().types[s.type_index] == b\"NodeImageLayer\")\n                .ok_or_else(|| Error::new(\"socket_constructor\", \"pass storage schema absent\"))?;\n            let index_field = kit.schema().structs[si]\n                .fields",
+          "                .iter()\n                .find(|f| f.name == b\"pass_index\")\n                .ok_or_else(|| Error::new(\"socket_constructor\", \"pass_index absent\"))?;\n            if kit.schema().types[index_field.type_index] != b\"int\"\n                || index_field.size != 4",
+          "            {\n                return Err(Error::new(\n                    \"socket_constructor\",\n                    \"pass_index is not observed signed32 storage\",\n                ));",
+          "                .iter()\n                .find(|f| f.name == b\"pass_name\")\n                .ok_or_else(|| Error::new(\"socket_constructor\", \"pass_name absent\"))?\n                .size;\n            if source_pass.contains('\\0') || source_pass.len() >= width {",
+          "        {\n            let defaults = self.target(socket, &[\"default_value\"])?.ok_or_else(|| {\n                Error::new(\"socket_constructor\", \"imported vector default absent\")\n            })?;\n            // Observed generic Vector outputs (including native Image.Normal)",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "socket_owner",
+      "reason": "Only socket_remove/new_pass methods; no public structural operation adds/removes individual sockets; node_new imports immutable KIT sockets instead.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "        let sockets = self.list(node, &[direction])?;\n        if !sockets.contains(&socket) {\n            return Err(Error::new(\"socket_owner\", \"socket not in node/direction\"));\n        }\n        for link in self.list(tree, &[\"links\"])? {",
+          "        self.compatible(kit)?;\n        if self.ty(node) != b\"bNode\" {\n            return Err(Error::new(\"socket_owner\", \"owner must be a node\"));\n        }\n        if !matches!(",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "text_constructor",
+      "reason": "Only Graph::text_new missing fixed Text prototype. No public Text constructor transport; node-tree operation parser only node/link ops.",
+      "proof": {
+        "commit": "ca576fa",
+        "files": [
+          "src/file_ops/operations.rs",
+          "src/file_ops/graph.rs",
+          "src/node_tree_edit.rs",
+          "bindings/python/src/writers.rs"
+        ],
+        "snippets": [
+          "            .iter()\n            .position(|b| b.code == *b\"TX\\0\\0\")\n            .ok_or_else(|| Error::new(\"text_constructor\", \"Text prototype absent\"))?;\n        let map = self.import(kit, &[source], None, false)?;\n        let text = map[&source];",
+          "pub(crate) struct Graph<'a> {\n    pub schema: &'a BlendFile,\n    pub records: Vec<Record>,\n    pub operations: Vec<serde_json::Value>,\n    next: u64,\n}",
+          "    pub fn import(\n        &mut self,\n        f: &BlendFile,\n        roots: &[usize],\n        destination: Option<usize>,\n        isolated_root: bool,\n    ) -> Result<HashMap<usize, usize>> {\n        self.import_with_compositor(f, roots, destination, isolated_root, None)",
+          "        let owner = self.records[tree].owner;\n        let map = self.import(kit, &[prototype], Some(owner), true)?;\n        let node = map[&prototype];",
+          "fn apply(g: &mut Graph<'_>, tree: usize, kit: &BlendFile, op: &Operation) -> Result<()> {\n    match op {\n        Operation::AddNode { node_type, name } => {\n            if !SUPPORTED.contains(&node_type.as_str()) {\n                return Err(Error::new(\n                    \"node_constructor\",\n                    format!(\n                        \"unsupported node type {node_type}; supported: {}\",\n                        SUPPORTED.join(\", \")\n                    ),\n                ));\n            }\n            g.node_new(tree, kit, node_type, name)?;"
+        ]
+      }
+    },
+    {
+      "kind": "unresolved_persistent",
+      "reason": "Report-state interior, reclassified at the reader boundary. Owner-DATA lookup raises unresolved_persistent internally, but get/pointer reclassify it to dangling_pointer (src/value.rs) before any terminal is constructed; pointer-census records it only as a sites state string. No standalone CLI/Python envelope with kind unresolved_persistent exists for readers.",
+      "proof": {
+        "files": [
+          "src/value.rs"
+        ],
+        "snippets": [
+          "if e.kind == \"unresolved_persistent\" {",
+          "e.reclassify(\"dangling_pointer\")"
+        ]
+      }
+    },
+    {
+      "kind": "unverified_semantics",
+      "reason": "Report-embedded per-field query error, never the terminal kind. An unqualified semantic/profile control is returned as unverified_semantics collected into report.errors (src/query/props.rs); the terminal is always incomplete_query (src/main.rs). Python raises IncompleteQueryError.",
+      "proof": {
+        "files": [
+          "src/query/props.rs",
+          "src/main.rs",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "\"unverified_semantics\",",
+          "\"incomplete_query\",",
+          "\"requested fields unavailable; all independent rows retained, inspect errors and each next_action\","
+        ]
+      }
+    },
+    {
+      "kind": "ambiguous_id",
+      "reason": "Retained-only across all three engine emitters, never a terminal CLI/Python exception kind. Trace captures via self.capture (terminal incomplete_trace), overrides stores OverrideFailureKind::AmbiguousId inside OverrideReport (terminal incomplete_overrides), and query linked resolve_id ambiguous_id is caught as diagnostics/Link::none_with with terminal incomplete_query. No public diff/trace/overrides/query/list/pack path returns ambiguous_id as Err; the inventory terminal-kind gate therefore cannot witness it, and observing it inside a retained report is not a witness.",
+      "proof": {
+        "files": [
+          "src/trace.rs",
+          "src/overrides.rs",
+          "src/query/linked.rs",
+          "src/query/collection_graph.rs",
+          "src/main.rs",
+          "src/strict.rs"
+        ],
+        "snippets": [
+          "Error::new(\"ambiguous_id\",\"multiple forwarding libraries match this saved selector; all candidates retained, selected origin unknown\")",
+          "self.capture(*error);",
+          "OverrideFailureKind::AmbiguousId => \"ambiguous_id\",",
+          "saved ID {} has multiple local-first candidates in {}",
+          "match links.resolve_id",
+          "\"incomplete_trace\","
+        ]
+      }
+    },
+    {
+      "kind": "diff_extent",
+      "reason": "Defensive field-bounds check in diff walk_fields unreachable for files passing earlier admission. Inventory::new runs pointer_census first (which refuses count/size mismatch as record_extent via mul(size,count)!=size), and schema field offsets are derived from TLEN so off+len stays within count*size for valid files. A file that would hit diff_extent would first fail record_extent/invalid_block/truncated during open/census, never reach walk_fields as terminal diff_extent via public diff.",
+      "proof": {
+        "files": [
+          "src/diff.rs",
+          "src/file_ops.rs"
+        ],
+        "snippets": [
+          "Error::new(\"diff_extent\", \"field beyond allocation\")",
+          "format!(\"block {block}: typed count/length mismatch\")",
+          "let c = pointer_census(f)?;"
+        ]
+      }
+    },
+    {
+      "kind": "diff_pointer_array",
+      "reason": "Unreachable as a raised terminal: every saved ** (pointer-depth 2) site is refused by the shared role qualifier before diff's pointer-array expansion can observe it. Inventory::new first runs pointer_census (src/file_ops.rs) which records each ** validation failure as a site state (unprofiled_role) with target None, not as Err. expand_pointer_arrays (src/diff.rs) then skips all sites with target None and only checks resolved opaque targets whose field is **; since qualify_impl (src/file_ops/roles.rs) returns unprofiled_role for any pointer_depth !=1, no ** site is ever resolved, so the extent-not-aligned check is dead. Owned BGen fixtures with a **table pointing to 7-byte odd DATA (clean 16 vs odd 7) and native521 qualifier opaque odd allocations (62,57) both yield incomplete_diff on CLI and Python (unresolved [0].table, opaque compared as bytes), never diff_pointer_array. Prior writer-bypass rationale is superseded; correct basis is census refusal plus expansion skip. Evidence: exemption-challenge/probe-diff-pointer-array/work with raw CLI/Python streams and canonical full-match proofs.",
+      "proof": {
+        "files": [
+          "src/diff.rs",
+          "src/file_ops/roles.rs",
+          "src/file_ops.rs",
+          "src/file_ops/validate.rs"
+        ],
+        "snippets": [
+          "if p.pointer_depth != 1 {",
+          "\"pointer-to-pointer table requires an extent/element profile\",",
+          "let Some((target, _)) = site.target else {",
+          "if data.len() % width != 0 {",
+          "\"diff_pointer_array\",",
+          "pub fn pointer_census(f: &BlendFile) -> Result<Census> {",
+          "Err(e) => (None, e.kind),",
+          "return Err(Error::new(\"unprofiled_role\", p.path.clone()));"
+        ]
+      }
+    },
+    {
+      "kind": "input_changed",
+      "reason": "Requires concurrent source mutation between planning/capture and publication/check (pack input changed after planning, ZIP staged member size changed, Session check_reuse/check_all, library changed during admission, fetch capture signature). CLI single invocation has no captured snapshot; Python captured guard (open-modify-operate) has no CLI counterpart in the same argv. No safe deterministic CLI+Python pair without a racing writer thread; in-flight mutation is R32c unreachable in practice, not a portable fixture.",
+      "proof": {
+        "files": [
+          "src/pack.rs",
+          "src/pack_zip.rs",
+          "src/session.rs",
+          "src/query/linked.rs"
+        ],
+        "snippets": [
+          "\"pack input changed after complete planning\"",
+          "\"ZIP staged member size changed\"",
+          "\"input_changed\",",
+          "\"library changed during subtype admission\""
+        ]
+      }
+    },
+    {
+      "kind": "source_changed",
+      "reason": "Requires live backing identity/content change during a single scan (Input::check_source signature mismatch via fstat before/after). Both CLI and Python sample the same filesystem during one operation; a deterministic fixture would need a concurrent writer racing the scan (as in input.rs spill/source tests with explicit change() hook). No safe portable CLI+Python pair triggers it without an in-flight mutation thread.",
+      "proof": {
+        "files": [
+          "src/input.rs"
+        ],
+        "snippets": [
+          "\"source_changed\",",
+          "\"live backing identity/content changed during scan\"",
+          "fn check_source"
+        ]
+      }
+    },
+    {
+      "kind": "output_compression",
+      "reason": "verify_output is called only on the engine-internal staged file (edit with compress or modified family, typed_edit write path) with family gzip/zstd. Staged bytes are written by the engine own encoder; no public input controls staged bytes independently. Decoder failure would need encoder/decoder disagreement, disk corruption or in-flight staged mutation, not a reproducible safe user-input witness. Internal-only readback invariant.",
+      "proof": {
+        "files": [
+          "src/edit_decode.rs",
+          "src/edit.rs",
+          "src/typed_edit.rs"
+        ],
+        "snippets": [
+          "pub(crate) fn verify_output",
+          "\"output_compression\",",
+          "crate::edit_decode::verify_output"
+        ]
+      }
+    },
+    {
+      "kind": "output_decode_length",
+      "reason": "Same internal staged readback as output_compression: verify_output compares staged decode total to immutable decoded_length. Mismatch would need re-encoding truncation/corruption of the internal staged file after the engine wrote it. No public edit/rewrite/pack input controls staged total independently; only disk/race corruption reaches it. Internal-only, not a safe user fixture.",
+      "proof": {
+        "files": [
+          "src/edit_decode.rs",
+          "src/edit.rs"
+        ],
+        "snippets": [
+          "\"decoder output length differs from immutable decoded body\"",
+          "pub(crate) fn verify_output",
+          "crate::edit_decode::verify_output"
+        ]
+      }
+    },
+    {
+      "kind": "zip_encoding",
+      "reason": "Report-only in pack ZIP emission, not a raised terminal. pack_zip::emit inner zip_encoding refusal (relative.to_str() failure) is raised inside the pack planning/execution closure (src/pack.rs) whose failures are retained as PackReport errors entries via Err(e)=>report.errors.push(e); the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError via _admit for an incomplete pack report (operations.py pack/pack_sequence; lib.rs checked_pack_report only reclassifies input_changed, never zip_*). No direct public Python zip emitter exists (pack_zip is pub(crate) only; pack and pack_sequence share the same closure, verified all CLI/native callers). Therefore observable only inside a retained PackReport, never as raised exception kind. Prior ASCII/portability rationale was false; product supports Linux raw byte paths, and ZIP member name conversion is workspace-relative UTF-8 inside emit_inner, independent of test portability. Evidence: exemption-challenge/probe-zip-nested caller verification and successful zip pack reports.",
+      "proof": {
+        "files": [
+          "src/pack_zip.rs",
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          ".ok_or_else(|| Error::new(\"zip_encoding\", \"ZIP member must be UTF8\"))?",
+          "pub(crate) fn emit(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<()> {",
+          "crate::pack_zip::emit(&workspace.0, &members, &mut zip.file)?;",
+          "Err(e) => report.errors.push(e),",
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          ", IncompletePackError, 'pack', allow_incomplete)"
+        ]
+      }
+    },
+    {
+      "kind": "zip_path",
+      "reason": "Report-only in pack ZIP emission, not a raised terminal. pack_zip::emit inner zip_path refusals (member outside workspace via strip_prefix failure, unsafe member via non-Normal components) are raised inside the pack planning/execution closure (src/pack.rs) whose failures are retained as PackReport errors entries via Err(e)=>report.errors.push(e); the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError via _admit for an incomplete pack report (operations.py pack/pack_sequence). No direct public Python zip emitter exists (pack_zip is pub(crate) only; pack and pack_sequence share the same closure, verified all CLI/native callers including pack_sequence and report filing emit_bytes with fixed internal names). Therefore observable only inside a retained PackReport, never as raised exception kind. Prior planning-admission wording is superseded by the nested diagnostic to incomplete_pack callchain. Evidence: exemption-challenge/probe-zip-nested caller verification.",
+      "proof": {
+        "files": [
+          "src/pack_zip.rs",
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "Error::new(\"zip_path\", \"member outside workspace\")",
+          "Error::new(\"zip_path\", \"unsafe ZIP member\")",
+          "pub(crate) fn emit(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<()> {",
+          "crate::pack_zip::emit(&workspace.0, &members, &mut zip.file)?;",
+          "Err(e) => report.errors.push(e),",
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          ", IncompletePackError, 'pack', allow_incomplete)"
+        ]
+      }
+    },
+    {
+      "kind": "zip_width",
+      "reason": "Report-only in pack ZIP emission, not a raised terminal. pack_zip::emit_sources zip_width refusal (u16::try_from name length failure) is raised inside the pack planning/execution closure (src/pack.rs) whose failures are retained as PackReport errors entries via Err(e)=>report.errors.push(e); the command terminal constructed afterwards is always incomplete_pack (src/main.rs), and the Python facade raises IncompletePackError via _admit for an incomplete pack report (operations.py pack/pack_sequence). No direct public Python zip emitter exists (pack_zip is pub(crate) only; pack and pack_sequence share the same closure). Therefore observable only inside a retained PackReport, never as raised exception kind. Prior PATH_MAX/filesystem-limit rationale was speculative and incorrect for the terminal classification; the correct basis is the nested diagnostic to incomplete_pack callchain, not format-boundary unsafety. Evidence: exemption-challenge/probe-zip-nested caller verification.",
+      "proof": {
+        "files": [
+          "src/pack_zip.rs",
+          "src/pack.rs",
+          "src/main.rs",
+          "bindings/python/python/oxblend/operations.py"
+        ],
+        "snippets": [
+          "Error::new(\"zip_width\", \"member name exceeds ZIP u16 width\")",
+          "pub(crate) fn emit(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<()> {",
+          "crate::pack_zip::emit(&workspace.0, &members, &mut zip.file)?;",
+          "Err(e) => report.errors.push(e),",
+          "let error = oxblend::pack::strict_pack_refusal(&report);",
+          ", IncompletePackError, 'pack', allow_incomplete)"
+        ]
+      }
+    }
+  ]
+}

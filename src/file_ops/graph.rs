@@ -563,7 +563,7 @@ impl<'a> Graph<'a> {
         }
         for b in &selected {
             let id = map[b];
-            let original_owner = source_index.owner(*b);
+            let original_owner = source_index.owner(f, *b);
             if self.records[id].code == *b"DATA" {
                 self.records[id].owner = original_owner
                     .and_then(|o| map.get(&o).copied())

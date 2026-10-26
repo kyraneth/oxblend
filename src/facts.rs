@@ -53,6 +53,7 @@ struct Closure<'a> {
     blocks: Map<String, Json>,
     pending: Vec<usize>,
     addresses: HashMap<usize, String>,
+    errors: Vec<Json>,
 }
 impl<'a> Closure<'a> {
     fn visit(&mut self, index: Option<usize>) -> Result<Json> {
@@ -87,6 +88,48 @@ impl<'a> Closure<'a> {
         self.pending.push(index);
         Ok(json!(address))
     }
+    // A failed edge is unknown, not NULL. Keep its owner and all independent
+    // facts; read-side reporting never repairs or guesses a target.
+    fn reference(&mut self, index: usize, path: &[&str]) -> Json {
+        let result = self
+            .file
+            .pointer_field(index, path)
+            .and_then(|target| self.visit(target));
+        match result {
+            Ok(reference) => reference,
+            Err(error) => {
+                let steps = steps(path);
+                let pointer = match self.file.get(index, 0, &steps, false) {
+                    Ok(Value::Pointer(value)) => Some(value.to_string()),
+                    _ => None,
+                };
+                let expected = self
+                    .file
+                    .locate_field(index, 0, &steps)
+                    .ok()
+                    .map(|f| self.file.schema().types[f.field.type_index].as_slice());
+                let kind = self.file.dna_type_id(index).unwrap_or_default();
+                let name = self.file.id_name(index).ok().flatten();
+                let message = format!(
+                    "source block {index}, {}.{} (saved pointer {}): {}",
+                    crate::value::display_bytes(kind),
+                    path.join("."),
+                    pointer.as_deref().unwrap_or("unavailable"),
+                    error.message
+                );
+                let error = crate::value::with_text(
+                    json!({"kind":error.kind,"status":"unknown","message":message,
+                    "site":{"block_index":index,"block_address_decimal":self.file.blocks()[index].old_address.to_string(),
+                        "block_code":crate::value::display_bytes(code(&self.file.blocks()[index].code)),
+                        "block_name_hex":name.as_ref().map(|n|hex(n)),"struct":crate::value::display_bytes(kind),
+                        "field_path":path,"field_path_hex":path.iter().map(|p|hex(p.as_bytes())).collect::<Vec<_>>(),
+                        "pointer_value_decimal":pointer,"expected_target_type_hex":expected.map(hex)}}),
+                );
+                self.errors.push(error.clone());
+                json!({"status":"unknown","error":error})
+            }
+        }
+    }
     fn finish(&mut self) -> Result<()> {
         while let Some(index) = self.pending.pop() {
             let block_code = code(&self.file.block(index)?.code);
@@ -113,8 +156,7 @@ impl<'a> Closure<'a> {
                 .ok_or_else(|| Error::new("invalid_block", "closure address"))?
                 .clone();
             for path in fields {
-                let target = self.file.pointer_field(index, path)?;
-                let reference = self.visit(target)?;
+                let reference = self.reference(index, path);
                 self.blocks
                     .get_mut(&address)
                     .ok_or_else(|| Error::new("invalid_block", "closure block"))?["pointers"]
@@ -140,11 +182,16 @@ impl<'a> Closure<'a> {
         for address in objects {
             let mut current = address.clone();
             let mut seen = HashSet::new();
+            let mut known = true;
             while seen.insert(current.clone()) {
                 let value = self
                     .blocks
                     .get(&current)
                     .ok_or_else(|| Error::new("dangling_pointer", "root closure"))?;
+                if value["pointers"]["parent"]["status"] == "unknown" {
+                    known = false;
+                    break;
+                }
                 let parent = value["pointers"]["parent"].as_str();
                 if parent.is_none() || value["code"] == "ID" {
                     break;
@@ -152,6 +199,9 @@ impl<'a> Closure<'a> {
                 current = parent
                     .ok_or_else(|| Error::new("type", "parent address"))?
                     .to_owned();
+            }
+            if !known {
+                continue;
             }
             let root = self
                 .blocks
@@ -195,6 +245,7 @@ fn extract(file: &BlendFile, source: bool) -> Result<Json> {
         blocks: Map::new(),
         pending: Vec::new(),
         addresses: HashMap::new(),
+        errors: Vec::new(),
     };
     let mut indexes = Map::new();
     if !source {
@@ -227,10 +278,10 @@ fn extract(file: &BlendFile, source: bool) -> Result<Json> {
         if file.dna_type_id(glob)? != b"FileGlobal" {
             return Err(Error::new("unsupported_type", "GLOB is not FileGlobal"));
         }
-        let scene = file.pointer_field(glob, &["curscene"])?;
+        let scene = closure.reference(glob, &["curscene"]);
         entry = Some(
             json!({"address":file.block(glob)?.old_address.to_string(), "block_index":glob,
-            "value":{"code":"GLOB", "dna":"FileGlobal", "name":"", "fields":{}, "pointers":{"curscene":closure.visit(scene)?}}}),
+            "value":{"code":"GLOB", "dna":"FileGlobal", "name":"", "fields":{}, "pointers":{"curscene":scene}}}),
         );
     }
     closure.finish()?;
@@ -238,6 +289,10 @@ fn extract(file: &BlendFile, source: bool) -> Result<Json> {
         closure.roots()?;
     }
     let mut result = json!({"blocks":closure.blocks, "index":indexes});
+    if !closure.errors.is_empty() {
+        result["complete"] = json!(false);
+        result["errors"] = json!(closure.errors);
+    }
     if let Some(entry) = entry {
         result["entry"] = entry;
     }

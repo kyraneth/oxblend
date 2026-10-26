@@ -1,0 +1,35 @@
+{
+  "blender": "5.2.1 LTS",
+  "concrete": {
+    "ConcUDIM": {
+      "filepath": "//conc_udim_1005.png",
+      "tiles": [
+        1001,
+        1005
+      ]
+    },
+    "ConcUV": {
+      "filepath": "//conc_uv_u2_v1.png",
+      "tiles": [
+        1001,
+        1002
+      ]
+    }
+  },
+  "unknown": {
+    "Plain": {
+      "filepath": "//plain.png",
+      "tiles": [
+        1001,
+        1002
+      ]
+    },
+    "DirTok": {
+      "filepath": "//<UDIM>/still.png",
+      "tiles": [
+        1001,
+        1002
+      ]
+    }
+  }
+}

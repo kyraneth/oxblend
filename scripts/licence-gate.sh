@@ -47,9 +47,12 @@ while IFS=$'\t' read -r spec declared; do
         oxblend\ *) continue ;;
     esac
     # Read words as data: an unexpected token must never expand to CWD files.
-    read -r -a tokens <<< "$(printf '%s' "$declared" | sed 's/[()]//g; s/ OR / /g; s/ AND / /g')"
+    read -r -a tokens <<< "$(printf '%s' "$declared" | sed 's/[()]//g; s/ OR / /g; s/ AND / /g; s@/@ @g')"
     for token in "${tokens[@]}"; do
-        if ! printf '%s\n' $allow | grep -qx -- "$token"; then
+        # Consume all allow-list bytes: grep -q can SIGPIPE printf under
+        # pipefail and randomly reject an allowed licence. Legacy crate
+        # manifests use slash as the deprecated OR spelling, split above.
+        if ! printf '%s\n' $allow | grep -x -- "$token" >/dev/null; then
             printf 'licence: %s declares %s; deny.toml does not allow %s\n' \
                 "$spec" "$declared" "$token"
             failures=$((failures + 1))

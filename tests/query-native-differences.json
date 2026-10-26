@@ -1,0 +1,507 @@
+{
+  "schema": "oxblend.query-native-differences/1",
+  "note": "Exact documented saved-versus-loaded differences; never replaces the native goldens.",
+  "cases": {
+    "splash-4.2-resaved-5.2": [
+      {
+        "path": "/traces",
+        "kind": "expected_one_reader_open",
+        "actual": 2,
+        "reason": "source_aware_subtype_library_open"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/0/nodes/8/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      }
+    ],
+    "lone-monk-resaved-5.2": [
+      {
+        "path": "/scenes/0/values/compositor/trees/0/nodes/2/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/0/nodes/2/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      }
+    ],
+    "splash-3.4-multilayer-resaved-5.2": [
+      {
+        "path": "/scenes/0/values/id_properties/objects/1562/properties/system_entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/0/values/id_properties/objects/1562/properties/system_entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/0/values/id_properties/objects/1562/properties/entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/0/values/id_properties/objects/1562/properties/entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/0/values/id_properties/objects/1563/properties/system_entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/0/values/id_properties/objects/1563/properties/system_entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/0/values/id_properties/objects/1563/properties/entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/0/values/id_properties/objects/1563/properties/entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1562/properties/system_entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1562/properties/system_entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1562/properties/entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1562/properties/entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1563/properties/system_entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1563/properties/system_entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1563/properties/entries/Lattice/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      },
+      {
+        "path": "/scenes/1/values/id_properties/objects/1563/properties/entries/Root/target/library",
+        "kind": "type",
+        "expected_from_native": true,
+        "actual": null,
+        "reason": "native_override_reference_remap"
+      }
+    ],
+    "compositing-library-3.6-resaved-5.2": [
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/8/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/8/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/9/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/9/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      }
+    ],
+    "shading-3.6-multilayer-resaved-5.2": [
+      {
+        "path": "/scenes/0/values/compositor/trees/0/nodes/2/type",
+        "kind": "value",
+        "expected": "NodeUndefined",
+        "actual": "Undefined[CompositorNodeTexture]",
+        "reason": "native_undefined_class_repair"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/0/nodes/3/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/0/nodes/3/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/2/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/2/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/3/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/3/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/4/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/4/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/5/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/5/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/6/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/6/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/7/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/7/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/1/type",
+        "kind": "value",
+        "expected": "NodeUndefined",
+        "actual": "Undefined[CompositorNodeTexture]",
+        "reason": "native_undefined_class_repair"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/3/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/3/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/4/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/4/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/5/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/5/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/9/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/9/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/13/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/13/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/16/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/16/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/18/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/18/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/28/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/28/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      }
+    ],
+    "compositing-library-4.2-resaved-5.2": [
+      {
+        "path": "/scenes/0/values/compositor/trees/0/nodes/3/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/2/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/1/nodes/4/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/2/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/4/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/9/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/11/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/2/nodes/16/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/4/nodes/13/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/4/nodes/14/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/4/nodes/15/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketIntPixel",
+        "actual": "NodeSocketInt",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/4/nodes/15/inputs/3/type",
+        "kind": "value",
+        "expected": "NodeSocketFloatPixel",
+        "actual": "NodeSocketFloat",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/5/nodes/11/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      },
+      {
+        "path": "/scenes/0/values/compositor/trees/6/nodes/9/inputs/1/type",
+        "kind": "value",
+        "expected": "NodeSocketVectorPixel2D",
+        "actual": "NodeSocketVector2D",
+        "reason": "native_socket_class_specialization"
+      }
+    ]
+  }
+}

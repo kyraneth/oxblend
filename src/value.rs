@@ -374,11 +374,38 @@ impl BlendFile {
             .owner_index()?
             .resolve(self, block, address, &pointer)
             .map_err(|e| {
-                if e.kind == "unresolved_persistent" {
-                    Error::new("dangling_pointer", e.message)
+                let error = if e.kind == "unresolved_persistent" {
+                    e.reclassify("dangling_pointer")
                 } else {
                     e
-                }
+                };
+                use crate::failure_receipt::{Resolution, SourceContext, record_source_failure};
+                let mut source = SourceContext::block(self, block);
+                source.element = Some(element);
+                source.offset_in_block = Some(location.offset);
+                source.decoded_file_offset = self
+                    .blocks()
+                    .get(block)
+                    .and_then(|b| b.data_offset.checked_add(location.offset));
+                source.field_path = path
+                    .iter()
+                    .map(|step| match step {
+                        PathStep::Field(v) => v.clone(),
+                        PathStep::Index(i) => format!("[{i}]").into_bytes(),
+                    })
+                    .collect();
+                source.pointer = Some(address);
+                source.resolution = match error.kind {
+                    "dangling_pointer" => Resolution::Missing,
+                    "ambiguous_pointer" => Resolution::Ambiguous,
+                    "pointer_target_type" => Resolution::WrongType,
+                    _ => Resolution::Unknown,
+                };
+                // This is a forwarding boundary; the namespace owner's hook
+                // records the precise lookup check/namespace when available.
+                let check_id = "pointer.resolve.forwarded";
+                record_source_failure(&error, check_id, source, &[]);
+                error
             })?;
         if crate::file_ops::roles::checked_source_role(&pointer) {
             // A saved dependency role admits a checked target, not arbitrary

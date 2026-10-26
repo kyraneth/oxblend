@@ -9,9 +9,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct Workspace(pub PathBuf);
 impl Workspace {
-    pub(crate) fn create() -> Result<Self> {
+    /// ZIP staging lives under the operation-frozen temp root, never a
+    /// re-sampled process temp.
+    pub(crate) fn create_in(temp_root: &Path) -> Result<Self> {
         loop {
-            let path = std::env::temp_dir().join(format!(
+            let path = temp_root.join(format!(
                 "oxblend-zip-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
@@ -85,9 +87,29 @@ pub(crate) fn emit(directory: &Path, paths: &[PathBuf], output: &mut File) -> Re
     emit_inner(directory, paths, output)
         .map_err(|e| crate::edit_output::context(e, "emit ZIP from workspace", directory))
 }
+type Source<'a> = (Vec<u8>, u16, u64, Box<dyn Read + 'a>);
+/// Serialize already-verified immutable bodies without reopening staged paths.
+/// Reporting shares the native ZIP64 writer; there is no second archive format.
+pub(crate) fn emit_bytes(members: &[(String, Vec<u8>)], output: &mut File) -> Result<()> {
+    let sources = members.iter().map(|(name, bytes)| {
+        let relative = Path::new(name);
+        if relative
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+        {
+            return Err(Error::new("zip_path", "unsafe ZIP member"));
+        }
+        Ok((
+            name.as_bytes().to_vec(),
+            storage_method(relative, relative),
+            bytes.len() as u64,
+            Box::new(std::io::Cursor::new(bytes.as_slice())) as Box<dyn Read + '_>,
+        ))
+    });
+    emit_sources(sources, output)
+}
 fn emit_inner(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<()> {
-    let mut entries = Vec::new();
-    for path in paths {
+    let sources = paths.iter().map(|path| {
         let relative = path
             .strip_prefix(directory)
             .map_err(|_| Error::new("zip_path", "member outside workspace"))?;
@@ -102,9 +124,6 @@ fn emit_inner(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<
             .ok_or_else(|| Error::new("zip_encoding", "ZIP member must be UTF8"))?
             .as_bytes()
             .to_vec();
-        let name_len = u16::try_from(name.len())
-            .map_err(|_| Error::new("zip_width", "member name exceeds ZIP u16 width"))?;
-
         let method = storage_method(relative, path);
         let file =
             File::open(path).map_err(|e| crate::edit_output::io_at("open ZIP member", path, e))?;
@@ -112,6 +131,19 @@ fn emit_inner(directory: &Path, paths: &[PathBuf], output: &mut File) -> Result<
             .metadata()
             .map_err(|e| crate::edit_output::io_at("fstat ZIP member", path, e))?
             .len();
+        Ok((name, method, size, Box::new(file) as Box<dyn Read>))
+    });
+    emit_sources(sources, output)
+}
+fn emit_sources<'a>(
+    sources: impl Iterator<Item = Result<Source<'a>>>,
+    output: &mut File,
+) -> Result<()> {
+    let mut entries = Vec::new();
+    for source in sources {
+        let (name, method, size, file) = source?;
+        let name_len = u16::try_from(name.len())
+            .map_err(|_| Error::new("zip_width", "member name exceeds ZIP u16 width"))?;
         let offset = output.stream_position().map_err(io)?;
         u32v(output, 0x04034b50)?;
         u16v(output, 45)?;

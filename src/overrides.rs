@@ -95,6 +95,7 @@ pub struct OverrideFailure {
     pub block_address: Option<u64>,
     pub field_path: Vec<Vec<u8>>,
     pub pointer_address: Option<u64>,
+    pub site: Json,
     pub library_path: Option<Vec<u8>>,
     pub message: String,
 }
@@ -349,12 +350,16 @@ impl Context {
             block_address: self.reader(v).block(v.block).ok().map(|b| b.old_address),
             field_path: p.iter().map(|s| s.as_bytes().to_vec()).collect(),
             pointer_address: addr,
+            site: crate::trace::failure_site(
+                self.reader(v),
+                v.block,
+                0,
+                &p.iter().map(|s| s.as_bytes().to_vec()).collect::<Vec<_>>(),
+            ),
             library_path: lib,
             message: message.into(),
         };
-        if kind == OverrideFailureKind::DanglingPointer
-            && self.options.pointers == PointerMode::NonStrict
-        {
+        if kind == OverrideFailureKind::DanglingPointer {
             self.report.warnings.push(OverrideWarning::SilencedPointer {
                 failure: failure.clone(),
             });
@@ -1209,20 +1214,20 @@ impl<T> PointerState<T> {
                 json!({"state":"resolved","address_decimal":address.to_string(),"target":encode(target)})
             }
             Self::Dangling { address } => {
-                json!({"state":"dangling","address_decimal":address.to_string()})
+                json!({"state":"dangling","status":"unknown","address_decimal":address.to_string()})
             }
             Self::Ambiguous {
                 address,
                 candidates,
             } => {
-                json!({"state":"ambiguous","address_decimal":address.to_string(),"candidates":candidates.iter().map(Provenance::json).collect::<Vec<_>>()})
+                json!({"state":"ambiguous","status":"unknown","address_decimal":address.to_string(),"candidates":candidates.iter().map(Provenance::json).collect::<Vec<_>>()})
             }
             Self::InvalidLayout {
                 address,
                 source,
                 message,
             } => {
-                json!({"state":"invalid_layout","address_decimal":address.to_string(),"source":source.as_ref().map(Provenance::json),"message":message})
+                json!({"state":"invalid_layout","status":"unknown","address_decimal":address.to_string(),"source":source.as_ref().map(Provenance::json),"message":message})
             }
         }
     }
@@ -1240,7 +1245,7 @@ impl OverrideFailure {
             OverrideFailureKind::AmbiguousId => "ambiguous_id",
             OverrideFailureKind::Cycle => "cycle",
         };
-        json!({"kind":kind,"reader_kind":match self.kind {OverrideFailureKind::LibraryReader(k)=>Some(k),_=>None},"owner_file_hex":hex(&self.owner_file),"block_address_decimal":self.block_address.map(|a|a.to_string()),"field_path_hex":self.field_path.iter().map(|s|hex(s)).collect::<Vec<_>>(),"pointer_address_decimal":self.pointer_address.map(|a|a.to_string()),"library_path_hex":self.library_path.as_ref().map(|p|hex(p)),"message":self.message})
+        json!({"kind":kind,"status":if matches!(self.kind,OverrideFailureKind::MissingLibrary|OverrideFailureKind::MissingId){"missing"}else{"unknown"},"site":self.site,"reader_kind":match self.kind {OverrideFailureKind::LibraryReader(k)=>Some(k),_=>None},"owner_file_hex":hex(&self.owner_file),"block_address_decimal":self.block_address.map(|a|a.to_string()),"field_path_hex":self.field_path.iter().map(|s|hex(s)).collect::<Vec<_>>(),"pointer_address_decimal":self.pointer_address.map(|a|a.to_string()),"library_path_hex":self.library_path.as_ref().map(|p|hex(p)),"message":self.message})
     }
 }
 impl OverrideReport {

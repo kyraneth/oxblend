@@ -1,6 +1,54 @@
 {
   "tool": "oxblend",
   "events": {
+    "extract": {"kind":"span","fields":{}},
+    "extract.operation": {"kind":"span","fields":{"path":"source path"}},
+    "extract.select": {"kind":"span","fields":{"requested_ids":"exact ID names"}},
+    "extract.closure": {"kind":"span","fields":{}},
+    "extract.publish": {"kind":"span","fields":{"bytes":"decoded output bytes"}},
+    "decode.frame": {"kind":"span","min_level":2,"fields":{"format":"zstd_seekable","frame":"frame index","scope":"actual_frame","bytes":"successful decoded bytes","input_bytes":"compressed frame bytes","decoded_bytes":"successful decoded bytes","physical_bytes":"compressed frame bytes"}},
+    "decode.scan": {"kind":"span","min_level":2,"fields":{"format":"gzip or zstd","scope":"stream_scan","coverage":"bytes_requested_by_scan","bytes":"actual decoded bytes delivered, including forward-seek discards and partial work on error"}},
+    "hot.summary": {"kind":"point","fields":{"event":"aggregated phase: query.resolve, query.project, read.byte_array, read.pointer_table, decode.frame or decode.scan; per-call spans only at explicit level 2+","count":"instrumented calls per structural owner","total_ns":"sum of inclusive call residence nanoseconds, including nested calls","max_ns":"maximum inclusive call residence nanoseconds","bytes":"successful raw byte-array, pointer-table or decoded frame bytes; actual scan decoded bytes including partial/error work; zero for phases without byte output","input_bytes":"compressed frame bytes on successful frame decode; zero where no input-byte measurement is available","error_records":"number of retained error points with matching hot_event on the same structural owner","outcomes":"counts by observed terminal outcome; sum equals count"}},
+    "python.call": {"kind":"span","fields":{"operation":"public native binding operation","argument_count":"logical argument count","effective_policy":"strict, permissive or report","native_module":"installed extension path hex and SHA-256","binding_version":"binding crate version","engine_version":"engine version","build_commit":"binding source commit","run_identity":"shared native trace root identity"}},
+    "python.report": {"kind":"point","fields":{"operation":"report operation","complete":"coverage complete boolean","error_count":"error count when present","diagnostic_count":"operation diagnostics count"}},
+    "trace.operation": {"kind":"span","fields":{"path":"root source path"}},
+    "session.open": {"kind":"span","fields":{"memory":"effective retention: fast or bounded"}},
+    "session.read": {"kind":"span","fields":{}},
+    "session.query": {"kind":"span","fields":{}},
+    "session.trace": {"kind":"span","fields":{}},
+    "session.pack": {"kind":"span","fields":{"memory":"effective retention: fast or bounded"}},
+    "read.byte_array": {
+      "kind": "span",
+      "min_level": 2,
+      "fields": {
+        "block_index": "referencing saved block index (unitless)",
+        "element": "referencing saved record element (unitless)",
+        "path": "checked saved pointer field path",
+        "count": "requested raw byte count (bytes)",
+        "bytes": "successful output length (bytes)"
+      }
+    },
+    "read.pointer_table": {
+      "kind": "span",
+      "min_level": 2,
+      "fields": {
+        "block_index": "referencing saved block index (unitless)",
+        "element": "referencing saved record element (unitless)",
+        "path": "checked saved pointer field path",
+        "count": "requested pointer slot count (count)",
+        "bytes": "successful pointer slots read times saved pointer width (bytes)"
+      }
+    },
+    "node_tree_inspect": {"kind":"span","fields":{"path":"path","profile_build":"profile_build"}},
+    "node_tree_edit": {"kind":"span","fields":{"path":"path","profile_build":"profile_build"}},
+    "node_tree.plan": {"kind":"span","fields":{"spec_schema":"spec_schema"}},
+    "node_tree.validate": {"kind":"span","fields":{"tree_block":"tree_block","profile_build":"profile_build"}},
+    "node_tree.apply": {"kind":"span","fields":{"tree_block":"tree_block","operation":"operation","operation_index":"operation_index"}},
+    "node_tree.emit": {"kind":"span","fields":{"tree_block":"tree_block","changed_original_blocks":"changed_original_blocks","added_blocks":"added_blocks"}},
+    "node_tree.verify": {"kind":"span","fields":{"decoded_bytes":"decoded_bytes"}},
+    "node_tree.operation": {"kind":"point","fields":{"operation_index":"zero-based applied operation index","applied":"success boolean"}},
+    "node-tree": {"kind":"span","fields":{}},
+    "memory.capture": {"kind":"span","fields":{"bytes":"owned decoded bytes","io":"false: memory admission/index, not a filesystem read"}},
     "run": {
       "kind": "span",
       "fields": {
@@ -32,6 +80,9 @@
       "kind": "span",
       "fields": {
         "blocks": "indexed block count (count)",
+        "block_build_capacity": "BHead Vec capacity before exact-sized ownership (count)",
+        "block_build_storage_bytes": "BHead Vec capacity times Block size before shrinking (bytes)",
+        "block_storage_bytes": "retained exact BHead slice storage (bytes)",
         "types": "SDNA type count (count)",
         "decoded_bytes": "decoded extent in bytes"
       }
@@ -77,6 +128,12 @@
       }
     },
     "payload": {
+      "kind": "span",
+      "fields": {
+        "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
+      }
+    },
+    "read-batch": {
       "kind": "span",
       "fields": {
         "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
@@ -160,6 +217,21 @@
         "note": "CLI command span covers parsing, operation and complete stdout delivery; branch facts belong to child spans"
       }
     },
+    "exr-scan": {
+      "kind": "span",
+      "fields": {"note": "CLI scan including complete streamed stdout delivery"}
+    },
+    "exr-pixels": {"kind":"span","fields":{"note":"Explicit named pass extraction and complete stdout delivery"}},
+    "exr.pixels": {"kind":"span","fields":{"path":"input path","part":"zero-based part index","pass":"explicit channel prefix","codec":"locked codec version","parallel":"false"}},
+    "exr.select": {"kind":"span","fields":{"part":"zero-based part index","pass":"explicit channel prefix"}},
+    "exr.decode": {"kind":"span","fields":{"part":"zero-based part index","width":"pixels","height":"pixels","channels":"ordered names","samples_expected":"count"}},
+    "exr.verify": {"kind":"span","fields":{"samples_expected":"count"}},
+    "exr.output": {"kind":"point","fields":{"output":"destination path","output_written":"true on complete publication; null on failure"}},
+    "root.summary": {"kind":"point","fields":{"outputs":"output inventory","resource":"measured operation wall with source/scope/units; unavailable CPU/RSS null with reason","diagnostics_complete":"boolean"}},
+    "exr.file": {
+      "kind": "span",
+      "fields": {"path": "input file path; emitted at level 2"}
+    },
     "skill": {
       "kind": "span",
       "fields": {}
@@ -168,6 +240,14 @@
       "kind": "span",
       "fields": {}
     },
+    "error.help": {"kind":"span","fields":{"catalog_version":"version-matched built-in error catalog"}},
+    "report": {"kind":"span","fields":{}},
+    "report.snapshot": {"kind":"span","fields":{"privacy_profile":"structural","network":"false; local evidence only"}},
+    "diagnostic.invocation": {"kind":"point","fields":{"run_id":"random invocation-local identity","command":"product command","trace_identity":"trace/root-span pair or null"}},
+    "diagnostic.source": {"kind":"point","fields":{"id":"invocation-local failure ID","kind":"stable error kind","check_id":"source-owned check identity","context":"typed local source context","caused_by":"already-recorded child IDs"}},
+    "diagnostic.propagation": {"kind":"point","fields":{"id":"same carried failure ID, not a new failure","propagations":"typed forwarding kind/check/context observations","context":"original check context enriched only by explicit carried identity"}},
+    "diagnostic.receipt": {"kind":"point","fields":{"receipt":"same complete local receipt delivered with final error envelope","sha256":"canonical receipt SHA-256"}},
+    "root.summary": {"kind":"point","fields":{"outputs":"actual output inventory","resource":"L5-owned measured values with source/unit/scope, or null with reason","diagnostic":"receipt identity/digest and source coverage"}},
     "version": {
       "kind": "span",
       "fields": {}
@@ -181,6 +261,26 @@
     "serialize": {
       "kind": "span",
       "fields": {}
+    },
+    "input.paths": {
+      "kind": "span",
+      "fields": {
+        "path_hex": "native-byte path-list input identity (hex), '-' is stdin",
+        "nul_delimited": "NUL delimiter selected for every list input (boolean)",
+        "entries": "nonempty literal path entry count"
+      }
+    },
+    "trace.root": {
+      "kind": "span",
+      "fields": {
+        "input_path_hex": "selected lexical absolute root identity (hex)"
+      }
+    },
+    "cross_reference": {
+      "kind": "span",
+      "fields": {
+        "roots": "selected lexical root context count"
+      }
     },
     "pack.operation": {
       "kind": "span",
@@ -198,7 +298,7 @@
     },
     "pack.plan": {
       "kind": "span",
-      "fields": {}
+      "fields": {"memory":"effective retention: fast or bounded"}
     },
     "pack.execute": {
       "kind": "span",
@@ -274,6 +374,34 @@
         "fallback_reason": "errno, zero_return or null"
       }
     },
+    "raw.window.miss": {
+      "kind": "point",
+      "fields": {
+        "path": "selective raw source path",
+        "offset": "aligned window start (bytes)",
+        "length": "window bytes fetched (bytes)"
+      }
+    },
+    "raw.capture.selective": {
+      "kind": "point",
+      "fields": {
+        "path": "selective raw source path",
+        "decoded_len": "physical/decoded length (bytes)",
+        "blocks": "parsed BHead count"
+      }
+    },
+    "raw.publish.plan": {
+      "kind": "point",
+      "fields": {
+        "path": "planned source path",
+        "output": "member output path",
+        "edits": "sealed path-rewrite count",
+        "clears": "sealed pointer-clear count",
+        "edit_keys": "per-edit block/element/length identity (no content)",
+        "clear_keys": "per-clear block/offset/address identity",
+        "reader": "selective window counters at publication"
+      }
+    },
     "query.stats": {
       "kind": "point",
       "fields": {
@@ -281,6 +409,73 @@
         "open_index_ms": "open/index residence milliseconds",
         "query_ms": "post-open query residence milliseconds",
         "complete": "traversal complete (boolean)"
+      }
+    },
+    "query": {
+      "kind": "span",
+      "fields": {"note": "CLI command covers parsing, source admission and complete stdout delivery"}
+    },
+    "catalog": {
+      "kind": "span",
+      "fields": {"note": "CLI authored catalog command"}
+    },
+    "explain": {
+      "kind": "span",
+      "fields": {"note": "CLI concept or file-aware SDNA explanation"}
+    },
+    "query.evaluate": {
+      "kind": "span",
+      "fields": {
+        "type": "requested saved type or concept",
+        "fields": "requested field projections (array)",
+        "catalog_revision": "authored catalog revision",
+        "row_count": "returned saved records (count)",
+        "complete": "requested projection coverage (boolean)"
+      }
+    },
+    "query.select": {
+      "kind": "span",
+      "fields": {"type": "requested saved type or concept"}
+    },
+    "query.project": {
+      "kind": "span",
+      "min_level": 2,
+      "fields": {
+        "field": "requested field projection",
+        "block_index": "saved block index (unitless)",
+        "element": "saved record element (unitless)"
+      }
+    },
+    "query.resolve": {
+      "kind": "span",
+      "min_level": 2,
+      "fields": {
+        "owner": "owning file for lexical path resolution",
+        "address": "saved address for diagnostic dereference",
+        "role": "pointer dereference role",
+        "command": "CLI read owner when wrapping one command",
+        "block_index": "saved block index (unitless)",
+        "element": "saved record element (unitless)",
+        "field": "checked saved pointer field path"
+      }
+    },
+    "query.library.open": {
+      "kind": "span",
+      "fields": {
+        "path": "lexical source path, UTF-8 or null",
+        "path_hex": "authoritative source path bytes",
+        "purpose": "linked_node_tree_subtype"
+      }
+    },
+    "catalog.evaluate": {
+      "kind": "span",
+      "fields": {"catalog_revision": "authored catalog revision"}
+    },
+    "explain.evaluate": {
+      "kind": "span",
+      "fields": {
+        "concept": "exact authored concept or SDNA type",
+        "file_aware": "actual source supplied (boolean)"
       }
     },
     "walk.file": {
@@ -308,9 +503,166 @@
       "fields": {
         "owners": "asset owner records (count)"
       }
+    },
+    "root.summary": {
+      "kind": "point",
+      "fields": {
+        "outputs": "output inventory",
+        "resource": "process CPU seconds, peak RSS KiB and IO block operations; unavailable facts explicit",
+        "diagnostics_complete": "boolean"
+      }
+    },
+    "decision": {
+      "kind": "point",
+      "fields": {
+        "item": "stable item identity",
+        "kind": "decision kind",
+        "reason": "selection/refusal/skip reason"
+      }
+    },
+    "error": {
+      "kind": "point",
+      "fields": {
+        "kind": "stable product error kind",
+        "hot_event": "aggregated hot phase identity, or null for ordinary spans",
+        "message": "diagnostic prose; not a stable identifier"
+      }
+    },
+    "hash": {
+      "kind": "span",
+      "fields": {
+        "path": "source path",
+        "algorithm": "algorithm label"
+      }
+    },
+    "copy": {
+      "kind": "span",
+      "fields": {
+        "path": "source path",
+        "bytes": "actual copied bytes"
+      }
+    },
+    "decode": {
+      "kind": "span",
+      "fields": {
+        "path": "compressed source path"
+      }
+    },
+    "durability": {
+      "kind": "span",
+      "fields": {
+        "policy": "requested sync policy",
+        "path": "destination path"
+      }
+    },
+    "reader.reuse": {
+      "kind": "span",
+      "fields": {
+        "path": "retained input identity"
+      }
+    },
+    "report.diagnostic": {
+      "kind": "point",
+      "fields": {
+        "record_type": "primary, propagation or report_observation as applicable",
+        "scope": "owning scope; final output effects are after requested sync"
+      }
+    },
+    "decision.observation": {
+      "kind": "point",
+      "fields": {
+        "record_type": "primary, propagation or report_observation as applicable",
+        "scope": "owning scope; final output effects are after requested sync"
+      }
+    },
+    "warning": {
+      "kind": "point",
+      "fields": {
+        "record_type": "primary, propagation or report_observation as applicable",
+        "scope": "owning scope; final output effects are after requested sync"
+      }
+    },
+    "output.effect": {
+      "kind": "point",
+      "fields": {
+        "record_type": "primary, propagation or report_observation as applicable",
+        "scope": "owning scope; final output effects are after requested sync"
+      }
+    },
+    "api.open": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.header": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.blocks": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.get": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.pointer": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.summary": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.close": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.closed": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.enter": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.exit": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
+    },
+    "api.transport": {
+      "kind": "span",
+      "fields": {
+        "note": "native binding call; per-call identity/outcome belongs to binding owner"
+      }
     }
   },
   "commands": {
+    "extract": ["run", "extract"],
+    "library": ["run"],
+    "node-tree": ["run","node-tree"],
+    "query": ["run", "query"],
+    "catalog": ["run", "catalog"],
+    "explain": ["run", "explain"],
     "summary": [
       "run",
       "summary"
@@ -383,6 +735,11 @@
       "run",
       "exr-header"
     ],
+    "exr-scan": [
+      "run",
+      "exr-scan"
+    ],
+    "exr-pixels": ["run", "exr-pixels"],
     "skill": [
       "run",
       "skill"
@@ -391,6 +748,7 @@
       "run",
       "help"
     ],
+    "report": ["run", "report", "report.snapshot"],
     "version": [
       "run",
       "version"

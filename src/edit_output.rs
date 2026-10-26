@@ -51,36 +51,60 @@ impl std::str::FromStr for Durability {
     }
 }
 pub(crate) fn sync_directories(directories: &BTreeSet<PathBuf>) -> Result<()> {
-    let mut ordered = directories.iter().collect::<Vec<_>>();
-    ordered.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
-    for directory in ordered {
-        File::open(directory)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| io_at("open/fsync directory", directory, e))?;
-    }
-    Ok(())
+    // Actual durability phase at the directory-fsync owner.
+    let span = crate::diagnostics::Span::new(
+        "durability",
+        if crate::diagnostics::enabled() {
+            serde_json::json!({"mechanism":"file-and-directory-fsync","directories":directories.len()})
+        } else {
+            serde_json::Value::Null
+        },
+    );
+    let result = (|| {
+        let mut ordered = directories.iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+        for directory in ordered {
+            File::open(directory)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| io_at("open/fsync directory", directory, e))?;
+        }
+        Ok(())
+    })();
+    span.result(result)
 }
 #[cfg(target_os = "linux")]
 pub(crate) fn sync_end(directory: &Path) -> Result<()> {
-    let directory_path = directory;
-    let directory = File::open(directory).map_err(|e| {
-        Error::new(
-            "durability",
-            format!("open syncfs directory {}: {e}", directory_path.display()),
-        )
-    })?;
-    let result = unsafe { libc::syncfs(directory.as_raw_fd()) };
-    if result < 0 {
-        return Err(Error::new(
-            "durability",
-            format!(
-                "syncfs directory {}: {}",
-                directory_path.display(),
-                std::io::Error::last_os_error()
-            ),
-        ));
-    }
-    Ok(())
+    // Actual durability phase at the syncfs owner.
+    let span = crate::diagnostics::Span::new(
+        "durability",
+        if crate::diagnostics::enabled() {
+            serde_json::json!({"mechanism":"syncfs-destination-filesystem","path":directory.to_string_lossy()})
+        } else {
+            serde_json::Value::Null
+        },
+    );
+    let result = (|| {
+        let directory_path = directory;
+        let directory = File::open(directory).map_err(|e| {
+            Error::new(
+                "durability",
+                format!("open syncfs directory {}: {e}", directory_path.display()),
+            )
+        })?;
+        let result = unsafe { libc::syncfs(directory.as_raw_fd()) };
+        if result < 0 {
+            return Err(Error::new(
+                "durability",
+                format!(
+                    "syncfs directory {}: {}",
+                    directory_path.display(),
+                    std::io::Error::last_os_error()
+                ),
+            ));
+        }
+        Ok(())
+    })();
+    span.result(result)
 }
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn sync_end(_directory: &Path) -> Result<()> {
@@ -115,7 +139,37 @@ const TEMP_PREFIX: &str = ".oxblend-stage-";
 // Namespace generation only, not cached input state or a retry/resource bound.
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) fn context(mut error: Error, operation: &str, path: &Path) -> Error {
+/// Shared canonical output context: part of the CLI canonical message,
+/// never stripped as Session presentation. The binding preserves it exactly.
+/// A shared operation prefix also closes any inner Session-only layer: the
+/// full prefixed message from this owner outward IS the canonical CLI
+/// message, so a later binding strip must not drop it. Clearing the
+/// recorded Session base here is what lets e.g. `pack 'dest':` survive
+/// `without_context` while pure read-path Session presentation
+/// (`fetch/read snapshot`, `snapshot/index` with no shared prefix outside)
+/// still restores exactly.
+pub(crate) fn context(error: Error, operation: &str, path: &Path) -> Error {
+    // Shared owner: do NOT record a strippable Session base. The full
+    // prefixed message IS the canonical CLI message; Error::without_context
+    // (binding Session strip) leaves it intact. Session-only presentation
+    // uses session_context below so only that layer restores.
+    // Operation-owner floor: a shared prefix applied outside an inner
+    // Session layer (e.g. pack wrapping a snapshot/index capture error)
+    // declares the whole message canonical, so the recorded Session base
+    // is dropped and a later strip keeps the full CLI message. Read paths
+    // apply no shared prefix, so their Session presentation still strips.
+    let mut error = error;
+    error.context_message = None;
+    error.message = format!("{operation} '{}': {}", path.display(), error.message);
+    error
+}
+
+/// Session-only presentation: recorded as strippable so the binding can
+/// restore the shared canonical cause without parsing. Kind is never touched.
+pub(crate) fn session_context(mut error: Error, operation: &str, path: &Path) -> Error {
+    if error.context_message.is_none() {
+        error.context_message = Some(error.message.clone().into_boxed_str());
+    }
     error.message = format!("{operation} '{}': {}", path.display(), error.message);
     error
 }
@@ -223,7 +277,11 @@ impl AtomicOutput {
             output: output.to_path_buf(),
             write_span: Some(crate::diagnostics::Span::new(
                 "write",
-                serde_json::json!({"path":output.to_string_lossy()}),
+                if crate::diagnostics::enabled() {
+                    serde_json::json!({"path":output.to_string_lossy()})
+                } else {
+                    serde_json::Value::Null
+                },
             )),
             parent,
             name,
@@ -255,19 +313,54 @@ impl AtomicOutput {
             }
             span.end("ok");
         }
+        // Publication with truthful output inventory: path, requested and
+        // completed durability travel in start/end data for the root ledger.
         let mut span = crate::diagnostics::Span::new(
             "publish",
-            serde_json::json!({"path":self.output.to_string_lossy()}),
+            if crate::diagnostics::enabled() {
+                serde_json::json!({"path":self.output.to_string_lossy(),"path_hex":crate::value::hex(self.output.as_os_str().as_encoded_bytes()),"durability_requested":durability.as_str(),"durability_mechanism":durability.mechanism()})
+            } else {
+                serde_json::Value::Null
+            },
         );
         let result = self
             .publish_inner(durability)
             .map_err(|e| context(e, "publish/sync output", &self.output));
-        span.data(serde_json::json!({"output_written":self.published,"durability_completed":self.durability_completed}));
-        span.result(result)
+        crate::failure_receipt::record_publication(
+            &self.output,
+            self.published,
+            self.durability_completed,
+        );
+        if span.active() {
+            // Actual staged bytes are known even when publication fails;
+            // output_written/durability_completed record the true effect.
+            span.data(serde_json::json!({"path":self.output.to_string_lossy(),"bytes":self.file.metadata().ok().map(|m| m.len()),"output_written":self.published,"durability_requested":durability.as_str(),"durability_completed":self.durability_completed,"durability_pending":durability == Durability::End,"effect_scope":"at_publication; end-sync effects follow in output.effect"}));
+        }
+        let result = span.result(result);
+        if let Err(e) = &result {
+            // Report-carried publication failures reconcile by kind/message.
+            if crate::diagnostics::enabled() {
+                crate::diagnostics::point(
+                    "error",
+                    serde_json::json!({"kind":e.kind,"message":e.message,"path":self.output.to_string_lossy(),"phase":"publish"}),
+                );
+            }
+        }
+        result
     }
     fn publish_inner(&mut self, durability: Durability) -> Result<()> {
         if durability == Durability::EachFile {
-            self.file.sync_all().map_err(io)?;
+            // Actual per-file durability at the file-sync owner.
+            let dspan = crate::diagnostics::Span::new(
+                "durability",
+                if crate::diagnostics::enabled() {
+                    serde_json::json!({"mechanism":"file-and-directory-fsync","scope":"stage_file"})
+                } else {
+                    serde_json::Value::Null
+                },
+            );
+            let r = self.file.sync_all().map_err(io);
+            dspan.result(r)?;
         }
         // Normal named-inode link(2) semantics, directory-FD anchored via linkat.
         // No /proc FD source, AT_SYMLINK_FOLLOW, filesystem branch or fallback.
@@ -301,7 +394,17 @@ impl AtomicOutput {
         self.published = true;
         self.remove_temp()?;
         if durability == Durability::EachFile {
-            self.parent.sync_all().map_err(io)?;
+            // Actual per-file durability at the file-sync owner.
+            let dspan2 = crate::diagnostics::Span::new(
+                "durability",
+                if crate::diagnostics::enabled() {
+                    serde_json::json!({"mechanism":"file-and-directory-fsync","scope":"parent_directory"})
+                } else {
+                    serde_json::Value::Null
+                },
+            );
+            let r = self.parent.sync_all().map_err(io);
+            dspan2.result(r)?;
             self.durability_completed = true;
         }
         Ok(())
@@ -319,6 +422,84 @@ impl Drop for AtomicOutput {
 mod tests {
     use super::*;
     use std::io::Write;
+    #[test]
+    fn shared_context_is_canonical_and_session_only_strips() {
+        let error = Error::new("io", "synthetic producer message");
+        error
+            .diagnostic
+            .set(std::sync::Arc::new(crate::failure_receipt::DiagnosticRef {
+                run_id: "synthetic-unit-run".into(),
+                failure_id: "synthetic-unit-failure".into(),
+            }))
+            .unwrap();
+        let reference = error.diagnostic_ref();
+        // Shared canonical contexts nest without recording a strippable base:
+        // the full prefixed message IS the CLI canonical message.
+        let shared = context(
+            context(error, "fetch", Path::new("library.blend")),
+            "snapshot",
+            Path::new("library.blend"),
+        );
+        assert_eq!(
+            shared.message,
+            "snapshot 'library.blend': fetch 'library.blend': synthetic producer message"
+        );
+        // Shared-only: without_context preserves every shared prefix.
+        let preserved = shared.clone().without_context();
+        assert_eq!(preserved.message, shared.message);
+        assert_eq!(preserved.kind, "io");
+        assert_eq!(preserved.diagnostic_ref(), reference);
+        // Session-only outer presentation records the shared-prefixed base so
+        // the binding strips only the Session layer, preserving shared.
+        let base = Error::new("io", "synthetic producer message");
+        base.diagnostic
+            .set(std::sync::Arc::new(crate::failure_receipt::DiagnosticRef {
+                run_id: "synthetic-unit-run".into(),
+                failure_id: "synthetic-unit-failure".into(),
+            }))
+            .unwrap();
+        let presented = session_context(
+            context(base, "fetch", Path::new("library.blend")),
+            "snapshot/index",
+            Path::new("library.blend"),
+        );
+        assert_eq!(
+            presented.message,
+            "snapshot/index 'library.blend': fetch 'library.blend': synthetic producer message"
+        );
+        let cause = presented.clone().without_context();
+        assert_eq!(
+            cause.message,
+            "fetch 'library.blend': synthetic producer message"
+        );
+        assert_eq!(cause.kind, "io");
+        assert_eq!(cause.diagnostic_ref(), reference);
+        assert_eq!(presented.diagnostic_ref(), reference);
+    }
+    // R38: a shared operation prefix applied OUTSIDE an inner Session
+    // layer is the canonical floor (e.g. pack wrapping a snapshot/index
+    // capture error). The shared owner drops the recorded Session base,
+    // so the binding strip keeps the full CLI message instead of
+    // restoring the pre-operation base. Read paths apply no shared
+    // prefix, so their Session presentation still strips (pinned above).
+    #[test]
+    fn shared_prefix_outside_session_presentation_survives_strip() {
+        let base = Error::new("invalid_header", "BLENDER magic");
+        let captured = session_context(base, "snapshot/index", Path::new("garbage.blend"));
+        assert_eq!(
+            captured.message,
+            "snapshot/index 'garbage.blend': BLENDER magic"
+        );
+        let packed = context(captured, "pack", Path::new("out"));
+        assert_eq!(
+            packed.message,
+            "pack 'out': snapshot/index 'garbage.blend': BLENDER magic"
+        );
+        assert_eq!(packed.kind, "invalid_header");
+        let preserved = packed.clone().without_context();
+        assert_eq!(preserved.message, packed.message);
+        assert_eq!(preserved.kind, "invalid_header");
+    }
     fn workspace(label: &str) -> std::path::PathBuf {
         let root =
             std::env::temp_dir().join(format!("oxblend-output-{}-{label}", std::process::id()));
@@ -411,5 +592,69 @@ mod tests {
         assert_eq!(std::fs::read(&output).unwrap(), b"complete");
         assert_eq!(std::fs::read(&input).unwrap(), b"original");
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+    }
+    // R35 permanent pin: trailing separator is a canonical output_path
+    // refusal with the shared create-output-stage prefix, preserved by the
+    // binding exactly as the CLI emits it. No stage is created.
+    #[test]
+    fn trailing_separator_is_canonical_output_path_with_stage_prefix() {
+        let root = workspace("trailing");
+        let input = root.join("input");
+        std::fs::write(&input, b"original").unwrap();
+        let output = root.join("out");
+        let trailing = std::path::PathBuf::from(format!("{}/", output.display()));
+        let error = match AtomicOutput::create(&input.metadata().unwrap(), &trailing) {
+            Err(error) => error,
+            Ok(_) => panic!("trailing separator must refuse"),
+        };
+        assert_eq!(error.kind, "output_path");
+        assert_eq!(
+            error.message,
+            format!(
+                "create output stage '{}': file output has a trailing separator",
+                trailing.display()
+            )
+        );
+        // Shared canonical: no strippable Session base recorded.
+        assert!(error.context_message.is_none());
+        let preserved = error.clone().without_context();
+        assert_eq!(preserved.message, error.message);
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    }
+    // Other AtomicOutput canonical variants stay pinned with the same prefix.
+    #[test]
+    fn atomic_output_canonical_variants_keep_stage_prefix() {
+        let root = workspace("variants");
+        let input = root.join("input");
+        std::fs::write(&input, b"original").unwrap();
+        let meta = input.metadata().unwrap();
+        // Empty output has no file name: shared stage prefix, never bare base.
+        let empty = std::path::Path::new("");
+        let error = match AtomicOutput::create(&meta, empty) {
+            Err(error) => error,
+            Ok(_) => panic!("empty output must refuse"),
+        };
+        assert_eq!(error.kind, "output_path");
+        assert!(error.message.starts_with("create output stage '': "));
+        assert!(error.context_message.is_none());
+        let preserved = error.clone().without_context();
+        assert_eq!(preserved.message, error.message);
+        // Parent is not a directory: regular file as parent. The preflight
+        // symlink check meets ENOTDIR first (io), still with the shared
+        // stage prefix, never a bare base message.
+        let not_dir = root.join("notdir-parent");
+        std::fs::write(&not_dir, b"file").unwrap();
+        let bad_child = not_dir.join("child");
+        // open(parent) succeeds (file), is_dir check refuses with prefix.
+        if let Err(error) = AtomicOutput::create(&meta, &bad_child) {
+            assert_eq!(error.kind, "io");
+            assert!(
+                error
+                    .message
+                    .starts_with(&format!("create output stage '{}': ", bad_child.display()))
+            );
+            assert!(error.context_message.is_none());
+        }
+        assert_eq!(std::fs::read(&input).unwrap(), b"original");
     }
 }

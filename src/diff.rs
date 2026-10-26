@@ -7,6 +7,17 @@ use serde_json::{Value as Json, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
+/// Exact incomplete comparison projection shared by CLI and language bindings.
+/// A returned engine error is not a completed comparison or an equality claim.
+pub fn failure_report(a: &Path, b: &Path, error: &Error) -> Json {
+    json!({"schema":"oxblend.diff/v1", "read_only":true,
+        "left":a.to_str(), "right":b.to_str(),
+        "left_path_hex":hex(a.as_os_str().as_encoded_bytes()),
+        "right_path_hex":hex(b.as_os_str().as_encoded_bytes()),
+        "equal":null, "complete":false, "difference_count":0, "differences":[],
+        "errors":[{"kind":error.kind,"message":error.message}]})
+}
+
 /// These exact serialized fields are process-local, not semantic file state.
 /// Every observed exclusion is returned with its reason; identifier is NOT here.
 fn ignored(ty: &[u8], field: &[u8]) -> Option<&'static str> {

@@ -40,11 +40,11 @@ with tempfile.TemporaryDirectory(prefix='oxblend-phases-') as temp:
         names = lambda rows: {r['event'] for r in rows}
         assert 'walk.file' in names(low)
         assert {'walk.select','walk.edges','walk.assets'} <= names(high)
-        assert not {'walk.select','walk.edges','walk.assets'} & names(low)
+        assert {'walk.select','walk.edges','walk.assets'} <= names(low)
         assert low[0]['data']['env']['tool.build.commit']
         assert low[0]['data']['env']['service.version']
         if command == 'pack':
-            assert not {'pack.copy','pack.repath','fetch'} & names(low)
+            assert {'pack.copy','pack.repath','fetch'} <= names(low)
             assert {'pack.copy','pack.repath','fetch'} <= names(high)
             summaries = [r for r in low if r['event']=='pack.execute' and r['state']=='end']
             assert len(summaries)==1 and summaries[0]['data']['files']==2 and summaries[0]['data']['published_files']==2, summaries
@@ -53,4 +53,4 @@ with tempfile.TemporaryDirectory(prefix='oxblend-phases-') as temp:
                     assert row['parent']==high[0]['span'], row
                     assert row['data']['links'] and row['data']['links'][0]['trace']==row['trace'], row
                     assert row['data']['links'][0]['relationship']=='submitted_by', row
-print('PHASES PASS: level-1 walk and execution summaries; level-2 phases, members and causality links')
+print('PHASES PASS: essential walk/member/fetch phases at both levels; submission causality links')

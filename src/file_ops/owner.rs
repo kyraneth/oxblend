@@ -10,6 +10,7 @@ use crate::{BlendFile, Error, Result};
 pub(crate) fn read_id(code: &[u8; 4]) -> bool {
     code[2..] == [0, 0] && code[..2] != [0, 0]
 }
+#[cfg(test)]
 pub(crate) fn read_owners(f: &BlendFile) -> Vec<Option<usize>> {
     let mut data_owner = None;
     f.blocks()

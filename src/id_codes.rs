@@ -42,6 +42,46 @@ pub(crate) const TYPES: &[(&[u8], &[&[u8]])] = &[
     (b"WO", &[b"World"]),
     (b"WS", &[b"WorkSpace"]),
 ];
+// Known ID families with no direct external-file declaration. ID/node links
+// still use the ordinary graph walk. Camera is deliberately NOT here: modern
+// DNA has a mode-qualified custom OSL filepath. See docs/ASSET-FAMILIES.md for
+// Blender 5.2.1 saved-DNA/RNA evidence and the historical/runtime exceptions.
+pub(crate) fn non_file_family(code: &[u8], ty: &[u8]) -> bool {
+    matches!(
+        code,
+        b"AC"
+            | b"AR"
+            | b"CU"
+            | b"CV"
+            | b"GD"
+            | b"GP"
+            | b"GR"
+            | b"KE"
+            | b"LA"
+            | b"LP"
+            | b"LS"
+            | b"LT"
+            | b"MA"
+            | b"MB"
+            | b"MS"
+            | b"PA"
+            | b"PC"
+            | b"PL"
+            | b"PT"
+            | b"SK"
+            | b"SN"
+            | b"SR"
+            | b"TE"
+            | b"WM"
+            | b"WO"
+            | b"WS"
+    ) && TYPES.iter().any(|(c, types)| {
+        *c == code
+            && types
+                .iter()
+                .any(|expected| canonical(expected) == canonical(ty))
+    })
+}
 pub(crate) const ALIASES: &[(&[u8], &[u8])] = &[
     (b"Group", b"Collection"),
     (b"Lamp", b"Light"),

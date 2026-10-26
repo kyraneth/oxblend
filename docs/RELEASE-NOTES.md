@@ -1,4 +1,168 @@
-# Oxblend 1.3.3
+# Oxblend 1.4.0 — 2026-10-26
+
+- Image-source Cryptomatte nodes now resolve their embedded ImageUser through the file's SDNA, enabling the existing sequence/member completeness rules in list, trace and pack; render-source nodes remain non-image users.
+
+- Default fast CLI pack/pack-sequence reads signature-checked selective raw
+  windows rather than retaining whole decoded raw sources. Compressed blends
+  fall back to full capture; Python Sessions retain captured sources. Bounded
+  mode re-reads and verifies bodies, trading speed for lower peak memory.
+  Measurements on selected workloads showed 27–53% lower fast-path heap;
+  these are workload observations, not universal memory or timing guarantees.
+
+- Replace the shipped logo with the approved Fab Garden studio-family variant b: O1 horns holding the O4 cube and short trace below. Full light/dark lockups retain variant a’s exact scale, spacing and baseline, adding b’s trace; README uses theme-aware SVGs. Penpot remains the design source of truth.
+
+- Typed edit schema 2 adds generic guarded `idprop-string` value edits on
+  same-layout 502/503 IDProperties: expected name/value, UTF-8 string type,
+  existing-allocation capacity and no-alias guards; atomic payload/len update,
+  preserving pointer/totallen/allocation. Structural node gates are unchanged.
+
+- Avoid cloning the complete `inspect` block-array JSON tree. On the measured
+  public Einar input (4,360,282 blocks), CLI peak RSS fell from 8,116,032 to
+  4,680,676 KiB and wall time from 26.96 to 11.33 seconds, with byte-identical
+  output. These are workload measurements, not memory or timing guarantees.
+
+- Add `read-batch FILE --requests SPEC` (additive): one open
+executes an ordered `{"schema":1,"requests":[...]}` plan of exactly the
+shared `inspect`/`get` (`--raw`/`--byte-array`/`--pointer-table`)/`pointer`/`payload`
+projections, streaming one JSONL item per request plus a terminal schema-1
+summary with counts, input/input_recheck and input_changed. Empty plans are
+valid and still check input. Success reports equal single-command stdout
+bytes; failed items equal single CLI error objects exactly (no `diagnostic_ref`
+inside) with the exact invocation-local sibling `diagnostic_ref` and no raw source snapshot. Independent failures use
+additive `incomplete_read_batch` (exit 2); source-change guards stop
+remaining as unobserved and outrank the aggregate; broken pipes stop without
+a summary. No new Python batch API and no arbitrary limits.
+
+- report now includes sanitized warning diagnostics. Warning-bearing saved
+  reports and direct library results retain ordered warning facts in the shared
+  closed report/source projection; errors keep their existing meaning. Only
+  report preview/ZIP derivatives change. Default path/name/message redaction
+  remains in force, with no source recapture or scene repair.
+
+- Add the full in-process Python binding (`pip install oxblend`, Linux x86_64,
+  CPython 3.11+ abi3, MIT): every engine command has a typed Python equivalent
+  operating on the same engine, with no CLI subprocess and no Blender. Reports
+  are immutable `Record` mappings with typed accessors, an exact CLI `.to_json()`
+  projection and separate retained `.diagnostics`; partial reports raise their
+  catalog error for the kind the engine actually reported (not always an
+  `Incomplete*Error`: `list` preserves `missing_asset`/`missing_library`/
+  `pattern_members_unknown`/`incomplete_trace`, and `extract` raises
+  `ExtractRefusalError`) with the report attached; `allow_incomplete=True` only
+  changes delivery and never suppresses `input_changed`. One generated exception class per catalog kind
+  (`ERROR_TYPES`: one unique class per catalog code, plus the native
+  `closed_file` lifecycle entry; `input_changed` stays `SourceChangedError`, and
+  the distinct `source_changed` code is `OxblendSourceChangedError`). Multi-root work
+  captures every root in one Session with `open_many(paths)`; separately captured
+  arenas are refused with a typed `UsageError`, never merged. Writers remain
+  new-path-only with explicit durability and publication facts, and any changed
+  source refuses. Ships complete stubs (`mypy --strict`), `py.typed`, a full API
+  reference, and a typed example; `docs/USAGE.md`, `docs/STABILITY.md` and the
+  bundled skill guide document the surface. The GIL is released around engine
+  work; free-threaded CPython is not claimed. Public package/import name is
+  `oxblend`; no npm package is introduced.
+
+- TILED Images whose saved filepath is a concrete tile file (for example
+  `monster_x_1005.png`, with no `<UDIM>`/`<UVTILE>` token) now expand exactly
+  like Blender on load: when the saved `Image.tiles` list is available,
+  non-empty and valid, Oxblend auto-tokenizes the concrete basename with
+  Blender's own filename-only regexes
+  (`BKE_image_ensure_tile_token_filename_only`,
+  `source/blender/blenkernel/intern/image.cc:3773`) and expands only the
+  saved tile numbers, reporting `is_udim:true`. Blender requires the literal
+  token only to save (`image_save.cc:667`); loading keeps the saved tiles, so
+  a missing saved tile is now concrete incompleteness (exit 2 with the missing
+  tile listed) instead of `pattern_members_unknown`. The directory is never
+  globbed to invent members; untokenizable basenames, unavailable/empty/
+  invalid tile lists and directory-only tokens stay UNKNOWN with the existing
+  reasons. Proven with Blender 5.2.1 save/reopen checks.
+
+- Add experimental `extract`: exact ID-name or physical-block selection, same-schema owned closure, explicit external-reference clear/refuse policy, reported runtime sanitation and structural fixups, and atomic new-output publication. No Python binding in this change. Embedded-ID root promotion remains refused; native proof is version-specific, not a general Blender compatibility certificate.
+
+- Add explicit `exr-pixels FILE --part N --pass NAME --output NEW.f32` with
+  pure-Rust `exr` 1.74.2 pixel codecs, exactly-once selected sample coverage,
+  source-identity checks and atomic no-replace raw f32le output. Own header and
+  batch structure readers remain independent of the pixel codec. No implicit
+  beauty/first-pass choice, colour transform or silent integer conversion.
+
+- Text filepath ownership follows saved `TXT_ISMEM`, not dirty state or presence
+  of cached lines. Embedded Text historical locations are informational
+  `embedded_text_filepath` records, not dependencies or pack blockers. Externally
+  backed Texts remain required, even when their cached content is serialized.
+  This intentionally removes embedded historical locations from list/trace/pack
+  dependency membership (#34). Missing or malformed Text flags leave storage
+  UNKNOWN: all path facts/pointer diagnostics survive and strict pack refuses;
+  no missing-flags fallback guesses external ownership. A proved empty path has
+  no filepath obligation. Native Text flags are documented across2.25–5.2.1 in
+  STABILITY; minimal external-Text test fixtures now explicitly declare flags=0,
+  preserving their original pointer/provenance assertions.
+- Pack streams opaque assets instead of retaining queued/completed asset bodies.
+  Capture retains only metadata and an identity digest; copying checks that digest,
+  length and ctime-inclusive signatures before no-replace publication. Existing
+  blend container proofs and guarded rewrite verification are unchanged (#33).
+- Pack accepts `--memory fast|bounded` (default `fast`) on both pack
+  commands, and the Python `open`/`File.pack` calls accept the same `memory`
+  spelling (`pack` defaults to the Session's opened policy). Bounded retains
+  digests and parsed indexes instead of decoded sources, re-reading and
+  re-verifying the single working body on reuse; it trades more IO and time for
+  lower peak memory on large sequences. Reports record `"memory":"bounded"`
+  only; absence of the key means fast. Unknown modes, and a pack mode differing
+  from the Session's opened policy, refuse as usage errors naming the cause (#33).
+
+- Trace/list/pack follow a selected local override's original reference ID and
+  its dependency graph. Native Blender loads those sources even when the local
+  override removes an edge; omitted sources now prevent strict publication.
+  Unrelated Library headers remain unselected (#32).
+- Reaching a completed linked stub again within one selection pass is no longer
+  mistaken for a recursive forwarding cycle. Ancestor-pass forwarding cycles
+  still report `cycle` and terminate (independent GLM review F2). Active stubs
+  are scoped to the actual library resolution branch, so completed sibling
+  resolutions no longer remain active for the entire file pass.
+- Forwarding-selector resolution now finishes before local endpoint dependency
+  expansion (#35). Mixed-selector batches may reuse an endpoint through a
+  completed forwarding alias without a false `cycle`. Actual forwarding-only
+  loops still report `cycle`; strict pack refuses them without publication.
+  This phase separation can change dependency discovery order and which saved
+  owner chain first discovers a shared library, without guessing away unknowns.
+- Follow linked ID stubs through their Library pointers, retaining every
+  qualified same-name source and reporting absence only at the chain endpoint.
+- List now prints its known file set when a linked ID is missing, with separate
+  `missing_links`/counts and `[missing linked ID]` text markers, completeness false
+  and exit 2. Existing physical libraries are never mislabeled missing.
+
+## Reports versus package production (intentional behavior changes)
+
+- Reports always tell everything; packages refuse unless `--permissive`.
+  `list`, `trace`, and `overrides` keep provable results and report missing files,
+  missing linked IDs and invalid/uninterpretable pointer subtrees at their sites.
+  Unknown means unknown, never a guessed dependency. All such reports are
+  `complete:false`, exit 2. Mode flags remain accepted compatibility no-ops.
+  Typed site kinds are retained; terminal report-incompleteness uses existing
+  `incomplete_trace` / `incomplete_overrides` kinds, and packages use existing
+  `incomplete_pack`. Physical-only list absence keeps its existing missing-file
+  terminal kind. The 0/2/3/5 application exit dispatch is unchanged. Pack's new
+  typed-cause forwarding mirrors trace JSON kinds rather than renaming them.
+- **Changed trace default:** unknown dependency edges no longer stop the rest of
+  collection; independent known results and unknown-site errors are retained.
+  Physical absence now makes trace incomplete too. True selected-root input
+  errors still refuse; corrupt dependency libraries become unknown subtrees.
+- **Changed pack default:** `pack` and `pack-sequence` now publish nothing on any
+  missing or unknown required item. Migration: explicitly add `--permissive`
+  (`--non-strict` alias) for a partial package marked INCOMPLETE, exit 2.
+  `mode`, `status` and `skipped_items` disclose the production policy and every
+  skipped reason; refusal hints name the typed cause and permissive escape.
+- Complete listings retain their legacy shape (membership corrections for
+  override sources and embedded Text historical paths are described above). Ordinary and
+  full-info list both retain every problem; verbosity cannot suppress a problem.
+  Reports carry no mode. All flattrace roots record effective `mode`,
+  `requested_mode` and default/explicit `mode_source` in existing attributes.
+- Explicit exclusions narrow requested scope rather than fail strict delivery.
+  `self_contained:false`, `excluded_count` and per-item flag/pattern/missing facts
+  disclose that a scoped complete package is not portable. Unreadable libraries
+  and unknown pointers remain strict refusals, even with exclusions.
+- Native name lookup now prefers local IDs over same-named forwarding stubs.
+  Fallback preserves every stub/library identity and reports ambiguity; directly
+  reached stubs always follow their actual Library pointers.
+- Release version is 1.4.0. Publication and tagging require separate approval.
 
 ## Correctness: paths and tracing
 
@@ -29,6 +193,24 @@
 - Public source and crate exports include the build-identity script and all
   public qualification helpers, plus a versioned changelog.
 
+## EXR facts
+
+- **EXR facts:** decoded per-part windows, compression, channels and standard
+  metadata; rational, timecode, keycode, tiledesc and preview dimensions join the
+  existing typed attribute reader. Unknown types keep raw hex and `decoded:false`.
+- Add `header_end` and `file_size`; keep `extent` as a documented deprecated 1.x
+  alias equal to `header_end`. Detect 1×1 data windows without guessing their cause.
+- Inspect offset tables and fixed chunk headers for scanline, tiled and multipart
+  storage, including all fourteen current compression codes (LJ2K and ZSTD
+  included), distinguishing header-only files and truncated chunks. Deep integrity
+  is explicitly unsupported. `pixel_integrity_verified` stays false.
+- `exr-scan [DIR|FILES...] [--files-from PATH|-] [-0] [--jobs N]` recursively
+  streams JSONL facts and a final status/output-tree summary in one parallel
+  process. File/stdin lists avoid OS argv limits. No pixel decoding or new
+  production dependency. Default parallelism is available cores.
+- Buffer header reads; reuse the shared descriptor/path source-signature check.
+  Declare scan tracing, with per-file detail spans at level 2.
+
 # Oxblend 1.3.2
 
 - Precisely qualified absent ID references in linked libraries now produce
@@ -56,7 +238,7 @@
   members are retained, and exit 2 plus typed stderr diagnostics remain. Successful
   listings keep their existing JSON shape; missing IDs and hard trace failures
   still refuse. Saved override references retain their physical source-library
-  declarations in `list` (fixing the Sprite Village existing-library omission)
+  declarations in `list` (fixing an existing-library omission)
   without changing `trace`/`pack` selection or censusing unused Library headers.
 - Re-vendored the MIT flattrace Rust writer's `FLATTRACE_LEVEL` support: 0 disables
   trace I/O, unset/empty defaults to 1, digits select a u64, invalid/overflow falls

@@ -61,6 +61,10 @@ fn resource_fixture(
         "source",
         "_pad[4]",
         "*properties",
+        "tiles",
+        "*first",
+        "*last",
+        "tile_number",
     ];
     let types = [
         "char",
@@ -71,6 +75,9 @@ fn resource_fixture(
         "PackedFile",
         "IDProperty",
         "MovieClip",
+        "ListBase",
+        "ImageTile",
+        "void",
     ];
     let id_size = if properties.is_some() { 96 } else { 88 };
     let mut dna = b"SDNANAME".to_vec();
@@ -96,11 +103,14 @@ fn resource_fixture(
         1,
         4,
         id_size,
-        id_size + 272,
+        id_size + 288,
         id_size + 256,
         0,
         0,
         id_size + 256,
+        16,
+        24,
+        0,
     ] {
         u16s(&mut dna, n)
     }
@@ -108,16 +118,18 @@ fn resource_fixture(
         dna.push(0)
     }
     dna.extend(b"STRC");
-    u32s(&mut dna, 4);
+    u32s(&mut dna, 6);
     let mut id_fields = vec![(2, 0), (2, 1), (0, 2), (4, 3)];
     if properties.is_some() {
         id_fields.push((6, 9));
     }
     for (ty, fields) in [
         (2, id_fields),
-        (3, vec![(2, 4), (0, 5), (5, 6), (1, 7), (0, 8)]),
+        (3, vec![(2, 4), (0, 5), (5, 6), (1, 7), (0, 8), (8, 10)]),
         (4, vec![(2, 4), (0, 5)]),
         (7, vec![(2, 4), (0, 5)]),
+        (8, vec![(10, 11), (10, 12)]),
+        (9, vec![(9, 0), (9, 1), (1, 13), (0, 8)]),
     ] {
         u16s(&mut dna, ty);
         u16s(&mut dna, fields.len());
@@ -137,10 +149,28 @@ fn resource_fixture(
         data
     };
     for (i, (path, source)) in paths.iter().enumerate() {
-        let mut data = id(format!("IMfixture{i}").as_bytes(), 0, 272);
+        let mut data = id(format!("IMfixture{i}").as_bytes(), 0, 288);
         data[id_size..id_size + path.len()].copy_from_slice(path);
         data[id_size + 264..id_size + 268].copy_from_slice(&source.to_le_bytes());
+        if *source == 6 {
+            let first = 0xb000 + i as u64 * 0x100;
+            data[id_size + 272..id_size + 280].copy_from_slice(&first.to_le_bytes());
+            data[id_size + 280..id_size + 288].copy_from_slice(&(first + 0x40).to_le_bytes());
+        }
         head(&mut out, b"IM\0\0", &data, 0x1000 + i as u64 * 0x100, 1);
+        if *source == 6 {
+            let first = 0xb000 + i as u64 * 0x100;
+            for tile in 0..2u64 {
+                let mut saved = vec![0u8; 24];
+                if tile == 0 {
+                    saved[..8].copy_from_slice(&(first + 0x40).to_le_bytes());
+                } else {
+                    saved[8..16].copy_from_slice(&first.to_le_bytes());
+                }
+                saved[16..20].copy_from_slice(&(1001i32 + tile as i32).to_le_bytes());
+                head(&mut out, b"DATA", &saved, first + tile * 0x40, 5);
+            }
+        }
     }
     for (i, path) in libraries.iter().enumerate() {
         let mut data = id(format!("LIlib{i}").as_bytes(), 0, 256);
@@ -192,8 +222,15 @@ fn serialized_recursive_star_ancestors_use_full_glob_grammar() {
     for p in [&a, &b, &w.0.join("a001[x]?.png")] {
         std::fs::write(p, []).unwrap();
     }
-    let candidate = parsed(&cli(&["list", "--json"], &[&src]));
-    assert_eq!(candidate[src.to_str().unwrap()], serde_json::json!([a, b]));
+    let output = cli(&["list", "--json"], &[&src]);
+    assert_eq!(output.status.code(), Some(2));
+    let candidate: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(candidate["complete"], false);
+    assert_eq!(candidate["errors"][0]["kind"], "pattern_members_unknown");
+    assert_eq!(
+        candidate["files"][src.to_str().unwrap()],
+        serde_json::json!([{ "path":a, "missing":false }, { "path":b, "missing":false }])
+    );
 }
 #[test]
 fn serialized_repeated_stars_keep_broad_byte_safe_membership() {
@@ -204,10 +241,13 @@ fn serialized_repeated_stars_keep_broad_byte_safe_membership() {
     std::fs::write(&literal, []).unwrap();
     std::fs::write(&numbered, []).unwrap();
     std::fs::write(w.0.join("b001.png"), []).unwrap();
-    let candidate = parsed(&cli(&["list", "--json"], &[&src]));
+    let output = cli(&["list", "--json"], &[&src]);
+    assert_eq!(output.status.code(), Some(2));
+    let candidate: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(candidate["errors"][0]["kind"], "pattern_members_unknown");
     assert_eq!(
-        candidate[src.to_str().unwrap()],
-        serde_json::json!([literal, numbered])
+        candidate["files"][src.to_str().unwrap()],
+        serde_json::json!([{ "path":literal, "missing":false }, { "path":numbered, "missing":false }])
     );
 }
 #[test]
@@ -340,7 +380,7 @@ fn incomplete_pack_overview_lists_decoded_or_hex_missing_paths() {
         if sequence {
             command.arg("-t");
         }
-        let out = command.arg(&target).output().unwrap();
+        let out = command.arg(&target).arg("--permissive").output().unwrap();
         assert_eq!(out.status.code(), Some(2));
         let report: Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(report["complete"], false);
@@ -368,8 +408,15 @@ fn serialized_address_refusal_and_packed_reporting() {
     // 88-byte ID and 256-byte filename before the packedfile pointer.
     data[380..388].copy_from_slice(&0x1000u64.to_le_bytes());
     std::fs::write(&src, data).unwrap();
-    let report = parsed(&cli(&["list", "--json", "--full-info"], &[&src]));
-    assert_eq!(report["packed"][0]["packed"], true);
+    // #31: 0x1000 is an Image ID address, not packed DATA. A nonzero
+    // declaration must no longer masquerade as proven packed contents.
+    let out = cli(&["list", "--json", "--full-info"], &[&src]);
+    assert_eq!(out.status.code(), Some(2));
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["complete"], false);
+    assert_eq!(report["problem_counts"]["pointer_target_type"], 1);
+    assert_eq!(report["errors"][0]["status"], "unknown");
+    assert_eq!(report["packed"][0]["packed"], Value::Null);
     assert!(report["files"].as_object().unwrap().is_empty());
     let absent = cli(&["blocks", "--address=0xdead"], &[&src]);
     assert!(!absent.status.success());
@@ -490,4 +537,101 @@ fn absolute_literal_plus_relative_sequence_can_copy_same_source_twice() {
         .count();
     assert_eq!(matching, 2);
     assert!(target.join("tile.1001.png").exists());
+}
+#[test]
+fn generic_uri_pack_targets_refuse_as_usage_before_local_interpretation() {
+    let w = Work::new();
+    let src = fixture(&w.0, &[]);
+    let absent = w.0.join("absent.blend");
+    // Runs inside the scratch dir so a locally interpreted URI target can
+    // only ever create its literal `scheme:` directory there, never in the
+    // caller's working directory.
+    let run = |args: &[&str], paths: &[&Path]| {
+        let mut c = Command::new(
+            std::env::var_os("OXBLEND_TEST_BINARY")
+                .unwrap_or_else(|| env!("CARGO_BIN_EXE_oxblend").into()),
+        );
+        c.args(args);
+        for p in paths {
+            c.arg(p);
+        }
+        c.current_dir(&w.0).output().unwrap()
+    };
+    fn refused(output: &std::process::Output, scheme: &str) {
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty());
+        let report: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(report["error"]["kind"], "usage");
+        let message = report["error"]["message"].as_str().unwrap();
+        // The refusal must name its cause (the URI scheme) and give a hint.
+        assert!(message.contains("URI"), "{message}");
+        assert!(message.contains(scheme), "{message}");
+        assert!(message.contains("filesystem"), "{message}");
+    }
+    // Generic valid schemes are refused for pack and pack-sequence, before
+    // the target is interpreted as a local path.
+    refused(&run(&["pack"], &[&src, Path::new("foo://farm/out")]), "foo");
+    assert!(!w.0.join("foo:").exists());
+    refused(
+        &run(&["pack-sequence", "-t", "asset-store://farm"], &[&src]),
+        "asset-store",
+    );
+    // Noop must not weaken the refusal: nothing is planned or written.
+    refused(
+        &run(
+            &["pack", "--noop"],
+            &[&src, Path::new("smb://server/share")],
+        ),
+        "smb",
+    );
+    // The refusal precedes local interpretation of the inputs: a missing
+    // input would otherwise be reported as exit 3 after the target check.
+    refused(
+        &run(&["pack"], &[&absent, Path::new("file://tmp/out")]),
+        "file",
+    );
+    // Known transports keep their own named refusal, excluded from the
+    // generic URI message.
+    for transport in ["s3", "https"] {
+        let out = run(
+            &["pack"],
+            &[&src, Path::new(&format!("{transport}://bucket/key"))],
+        );
+        assert_eq!(out.status.code(), Some(2), "{transport}");
+        let report: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(report["error"]["kind"], "usage");
+        let message = report["error"]["message"].as_str().unwrap();
+        assert!(message.contains("Shaman/S3 transport"), "{message}");
+    }
+    // A leading digit is not a valid scheme start, so this stays a local
+    // (if unusual) relative path and must keep packing.
+    let local = run(&["pack"], &[&src, Path::new("1x://farm/out")]);
+    assert!(
+        local.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&local.stderr)
+    );
+    let report: Value = serde_json::from_slice(&local.stdout).unwrap();
+    assert_eq!(report["complete"], true);
+    assert!(w.0.join("1x:/farm/out").join("source.blend").exists());
+}
+#[test]
+fn uri_targets_are_refused_at_the_public_pack_api_boundary() {
+    // The library boundary refuses URI targets itself, before inputs or the
+    // target are read or absolutized, even when the CLI layer is bypassed.
+    let error = oxblend::pack::pack(
+        &[PathBuf::from("/nonexistent.blend")],
+        Path::new("foo://farm/out"),
+        &Default::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, "usage");
+    assert!(error.message.contains("foo"), "{}", error.message);
+    assert!(error.message.contains("filesystem"), "{}", error.message);
 }

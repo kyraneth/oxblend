@@ -12,6 +12,8 @@ version = 2
 allow = [
     "0BSD",
     "Apache-2.0",
+    # exr -> half -> zerocopy offers BSD-2-Clause OR Apache-2.0 OR MIT.
+    "BSD-2-Clause",
     "BSD-3-Clause",
     "MIT",
     "Unicode-3.0",

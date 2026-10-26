@@ -76,7 +76,9 @@ fn read_ownership_does_not_admit_file_ops_writes() {
             },
         )
         .unwrap();
-        assert!(t.complete, "{name}: {:?}", t.errors);
+        assert!(t.errors.is_empty(), "{name}: {:?}", t.errors);
+        // #31: these fixture paths are absent, not a traversal failure.
+        assert_eq!(t.complete, t.usages.is_empty());
         let expected = if name == "unknown-id.blend" {
             // Trace does not enumerate the unknown ID as an Object root, but its
             // physical owner scope remains available to contextual getters.
@@ -115,7 +117,7 @@ fn read_ownership_does_not_admit_file_ops_writes() {
                 .iter()
                 .position(|b| b.old_address == 0x7000)
                 .unwrap();
-            assert_eq!(index.owner(ignored), None);
+            assert_eq!(index.owner(&f, ignored), None);
             assert_eq!(index.local(&f, ignored, 0x7000).unwrap(), None);
         }
     }
@@ -139,7 +141,7 @@ fn read_ownership_does_not_admit_file_ops_writes() {
         );
         if name == "data-after-placeholder.blend" {
             let index = f.owner_index().unwrap();
-            assert_eq!(index.owner(2), None);
+            assert_eq!(index.owner(&f, 2), None);
             assert_eq!(index.local(&f, 1, f.blocks()[2].old_address).unwrap(), None);
         }
         if name == "raw-linked-id.blend" {

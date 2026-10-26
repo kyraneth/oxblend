@@ -31,6 +31,8 @@ fn help_version_and_all_commands_are_discoverable() {
         "pack",
         "pack-sequence",
         "exr-header",
+        "exr-scan",
+        "exr-pixels",
         "pointer-census",
         "skill",
     ] {

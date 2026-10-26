@@ -285,7 +285,8 @@ fn dangling_cache_asset_pointer_is_not_ignored() {
             j["errors"][0]["field_path_hex"],
             serde_json::json!(["63616368655f66696c65"])
         );
-        assert!(j["usages"].as_array().unwrap().is_empty());
+        assert_eq!(j["errors"][0]["status"], "unknown");
+        assert_eq!(j["usages"].as_array().unwrap().len(), 2);
     }
 }
 #[test]
@@ -300,9 +301,6 @@ fn cache_site_reads_its_path_not_recursive_asset_dispatch() {
             j["errors"][0]["field_path_hex"],
             serde_json::json!(["69735f73657175656e6365"])
         );
-        assert_eq!(
-            j["usages"].as_array().unwrap().len(),
-            if perfile { 2 } else { 0 }
-        );
+        assert_eq!(j["usages"].as_array().unwrap().len(), 2);
     }
 }

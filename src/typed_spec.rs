@@ -114,7 +114,7 @@ fn field<'a>(s: &'a EditSnapshot, j: &J) -> Result<FieldRef<'a>> {
     s.field(index(&j["block_index"])?, index(&j["element"])?, steps)
 }
 pub fn plan<'a>(s: &'a EditSnapshot, j: &J, mode: EditMode) -> Result<EditPlan<'a>> {
-    keys(j, &["schema", "writes", "bits"])?;
+    keys(j, &["schema", "writes", "bits", "idprop_strings"])?;
     if j["schema"] != 2 {
         return Err(bad("schema 2 required"));
     }
@@ -172,5 +172,43 @@ pub fn plan<'a>(s: &'a EditSnapshot, j: &J, mode: EditMode) -> Result<EditPlan<'
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    plan_fields(s, &writes, &bits, mode)
+    let strings = j
+        .get("idprop_strings")
+        .map(|items| {
+            items
+                .as_array()
+                .ok_or_else(|| bad("idprop_strings array required"))?
+                .iter()
+                .map(|w| {
+                    keys(
+                        w,
+                        &[
+                            "operation",
+                            "block_index",
+                            "element",
+                            "path",
+                            "name_hex",
+                            "expected_hex",
+                            "replacement_hex",
+                        ],
+                    )?;
+                    if w["operation"] != "idprop-string"
+                        || w["path"] != serde_json::json!(["data", "pointer"])
+                    {
+                        return Err(bad("idprop-string requires path [data, pointer]"));
+                    }
+                    Ok(IdpropString {
+                        block_index: index(&w["block_index"])?,
+                        element: index(&w["element"])?,
+                        name: unhex(&w["name_hex"])?,
+                        expected: unhex(&w["expected_hex"])?,
+                        replacement: unhex(&w["replacement_hex"])?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let plan = plan_fields(s, &writes, &bits, mode)?;
+    plan_strings(s, plan, &strings)
 }

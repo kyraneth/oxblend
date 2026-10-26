@@ -7,6 +7,9 @@ mod embedded;
 pub(crate) mod graph;
 pub(crate) mod index;
 mod owner;
+#[cfg(test)]
+#[path = "../newtests/schema_program.rs"]
+mod schema_program_tests;
 pub(crate) use owner::qualify_read_id;
 pub(crate) mod roles;
 pub(crate) mod validate;
@@ -98,7 +101,60 @@ enum Walk {
     Enter(Work),
     Exit(usize),
 }
+/// Streaming execution owns only the schema program, never a reader/body lease.
+/// All structural failures are checked before yielding the first site.
+pub(crate) struct PointerSites {
+    program: std::sync::Arc<[PointerLayout]>,
+    size: usize,
+    count: usize,
+    record: usize,
+    site: usize,
+}
+pub(crate) struct ProgramSite {
+    program: std::sync::Arc<[PointerLayout]>,
+    site: usize,
+    record: usize,
+    base: usize,
+    pub(crate) offset: usize,
+}
+impl ProgramSite {
+    pub(crate) fn layout(&self) -> PointerLayout {
+        let template = &self.program[self.site];
+        let mut field = template.clone();
+        field.offset = self.offset;
+        field.parent_offset += self.base;
+        field.path = format!("[{}]{}", self.record, template.path);
+        field
+    }
+}
+impl Iterator for PointerSites {
+    type Item = ProgramSite;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.record == self.count || self.program.is_empty() {
+            return None;
+        }
+        let template = &self.program[self.site];
+        let base = self.record * self.size; // preflighted by pointer_sites
+        let field = ProgramSite {
+            program: self.program.clone(),
+            site: self.site,
+            record: self.record,
+            base,
+            offset: template.offset + base,
+        };
+        self.site += 1;
+        if self.site == self.program.len() {
+            self.site = 0;
+            self.record += 1;
+        }
+        Some(field)
+    }
+}
+
 pub(crate) fn pointer_layout(f: &BlendFile, block: usize) -> Result<Option<Vec<PointerLayout>>> {
+    Ok(pointer_sites(f, block)?.map(|sites| sites.map(|site| site.layout()).collect()))
+}
+pub(crate) fn pointer_sites(f: &BlendFile, block: usize) -> Result<Option<PointerSites>> {
     let b = f.block(block)?;
     if b.code == *b"DNA1" || b.sdna_index == 0 {
         return Ok(None);
@@ -111,12 +167,36 @@ pub(crate) fn pointer_layout(f: &BlendFile, block: usize) -> Result<Option<Vec<P
             format!("block {block}: typed count/length mismatch"),
         ));
     }
-    let mut out = Vec::new();
-    for i in 0..b.count {
-        walk(f, si, mul(i, size)?, &format!("[{i}]"), &mut out)?;
+    // A zero-count block did not walk its type in the compatibility path.
+    let program = if b.count == 0 {
+        std::sync::Arc::from([])
+    } else {
+        f.schema().pointer_programs[si]
+            .get_or_init(|| {
+                let mut out = Vec::new();
+                walk(f, si, 0, "", &mut out)?;
+                Ok(std::sync::Arc::from(out))
+            })
+            .clone()?
+    };
+    let base = mul(b.count.saturating_sub(1), size)?;
+    for field in program.iter() {
+        add(base, field.offset)?;
+        add(base, field.parent_offset)?;
     }
-    Ok(Some(out))
+    Ok(Some(PointerSites {
+        program,
+        size,
+        count: b.count,
+        record: 0,
+        site: 0,
+    }))
 }
+#[cfg(test)]
+thread_local! {
+    static PROGRAM_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn walk(
     f: &BlendFile,
     si: usize,
@@ -124,6 +204,8 @@ pub(crate) fn walk(
     path: &str,
     out: &mut Vec<PointerLayout>,
 ) -> Result<()> {
+    #[cfg(test)]
+    PROGRAM_BUILDS.with(|n| n.set(n.get() + 1));
     let mut stack = vec![Walk::Enter(Work {
         si,
         base,
@@ -241,10 +323,14 @@ fn census(
             opaque.push(i);
             continue;
         };
-        let payload = f.payload(i)?;
+        // L19: borrowed view (zero-copy for in-memory bodies and
+        // single-window selective blocks) instead of one owned copy per
+        // block. Guards and byte identity match `payload()`.
+        let view = f.payload_view(i)?;
+        let payload = view.as_slice();
         for field in layout {
             let address = number(
-                &payload,
+                payload,
                 field.offset,
                 f.header().pointer_size,
                 f.header().little_endian,
@@ -256,7 +342,7 @@ fn census(
             };
             sites.push(PointerSite {
                 block: i,
-                owner: index.owner(i),
+                owner: index.owner(f, i),
                 offset: field.offset,
                 path: field.path,
                 declared_type: field.declared_type,
@@ -267,7 +353,7 @@ fn census(
         }
     }
     Ok(Census {
-        owners: (0..f.blocks().len()).map(|i| index.owner(i)).collect(),
+        owners: index.owners(f),
         sites,
         opaque,
     })

@@ -108,6 +108,7 @@ fn literal_path(parent: &[u8], name: &[u8]) -> bool {
             | (b"VFont", b"name")
             | (b"MovieClip", b"name")
             | (b"CacheFile", b"filepath")
+            | (b"Camera", b"custom_filepath")
             | (b"Volume", b"filepath")
             | (b"CustomDataExternal", b"filename")
             | (b"NodeShaderTexIES", b"filepath")
@@ -135,13 +136,11 @@ fn import_path(reader: &BlendFile, edit: &PathRewrite) -> Result<bool> {
         return Ok(false);
     }
     let ix = reader.owner_index()?;
-    let Some(owner) = ix.owner(edit.block_index) else {
+    let Some(owner) = ix.owner(reader, edit.block_index) else {
         return Ok(false);
     };
-    for (b, block) in reader.blocks().iter().enumerate() {
-        if ix.owner(b) != Some(owner) || &block.code == b"DNA1" {
-            continue;
-        }
+    for b in ix.owned_blocks(reader, owner) {
+        let block = &reader.blocks()[b];
         if reader.dna_type_id(b)? != b"bNode" {
             continue;
         }
@@ -369,6 +368,12 @@ pub(crate) fn write_spans(
 }
 /// Inputs must remain stable for the call; never modifies an original descriptor.
 /// No output name is created until full validation and successful private write.
+/// Single prose owner for the strict rewrite refusal: thin wrapper over the
+/// shared [`crate::strict`] owner so the CLI delivery check and the native
+/// binding stay byte-identical with no duplicated literal.
+pub fn strict_rewrite_refusal() -> Error {
+    crate::strict::rewrite_refusal()
+}
 pub fn rewrite_paths(
     input: &Path,
     new_output: &Path,
@@ -567,4 +572,20 @@ pub(crate) fn rewrite_opened_cleared(
         Err(e) => report.fail(None, e),
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Error-parity pin: the CLI canonical rewrite refusal, shared with the
+    // native binding so Python matches the envelope exactly.
+    #[test]
+    fn shared_rewrite_refusal_matches_cli_canonical() {
+        let error = strict_rewrite_refusal();
+        assert_eq!(error.kind, "incomplete_edit");
+        assert_eq!(
+            error.message,
+            "inspect report.errors; no complete output published"
+        );
+    }
 }

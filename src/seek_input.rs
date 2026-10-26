@@ -163,34 +163,49 @@ impl Input {
     /// Full-proof callers release each frame immediately; do not populate the
     /// selective reader's retained touched-frame cells with the entire file.
     pub fn decode_frame(&self, i: usize) -> Result<Vec<u8>> {
-        let f = &self.frames[i];
-        let compressed = bytes(&self.file, f.physical, f.compressed)?;
-        let size = zstd::zstd_safe::find_frame_compressed_size(&compressed)
-            .map_err(|e| error(format!("invalid frame boundary {e}")))?;
-        if size != f.compressed {
-            return Err(error(
-                "entry boundary differs from independent zstd frame boundary",
-            ));
-        }
-        let decoder = zstd::stream::read::Decoder::new(compressed.as_slice())
-            .map_err(|e| error(e.to_string()))?;
-        let bound = checked::add(f.length, 1)?; // External decoded length + one byte detects an oversized frame.
-        let mut data = Vec::with_capacity(f.length);
-        decoder
-            .take(bound as u64)
-            .read_to_end(&mut data)
-            .map_err(|e| error(e.to_string()))?;
-        if data.len() != f.length {
-            return Err(error("frame decoded length differs from seek entry"));
-        }
-        if let Some(checksum) = f.checksum {
-            let mut hash = crate::edit_xxh::Xxh64::new();
-            hash.update(&data);
-            if hash.digest() as u32 != checksum {
-                return Err(error("seek-entry XXH64 checksum mismatch"));
+        let mut span = crate::diagnostics::Span::new_lazy("decode.frame", || {
+            if crate::diagnostics::enabled() {
+                serde_json::json!({"format":"zstd_seekable","frame":i,"scope":"actual_frame"})
+            } else {
+                serde_json::Value::Null
             }
-        }
-        Ok(data)
+        });
+        let result = (|| {
+            let f = &self.frames[i];
+            let compressed = bytes(&self.file, f.physical, f.compressed)?;
+            let size = zstd::zstd_safe::find_frame_compressed_size(&compressed)
+                .map_err(|e| error(format!("invalid frame boundary {e}")))?;
+            if size != f.compressed {
+                return Err(error(
+                    "entry boundary differs from independent zstd frame boundary",
+                ));
+            }
+            let decoder = zstd::stream::read::Decoder::new(compressed.as_slice())
+                .map_err(|e| error(e.to_string()))?;
+            let bound = checked::add(f.length, 1)?; // External decoded length + one byte detects an oversized frame.
+            let mut data = Vec::with_capacity(f.length);
+            decoder
+                .take(bound as u64)
+                .read_to_end(&mut data)
+                .map_err(|e| error(e.to_string()))?;
+            if data.len() != f.length {
+                return Err(error("frame decoded length differs from seek entry"));
+            }
+            if let Some(checksum) = f.checksum {
+                let mut hash = crate::edit_xxh::Xxh64::new();
+                hash.update(&data);
+                if hash.digest() as u32 != checksum {
+                    return Err(error("seek-entry XXH64 checksum mismatch"));
+                }
+            }
+            if crate::diagnostics::enabled() {
+                span.data(
+                    serde_json::json!({"bytes":data.len(),"input_bytes":f.compressed,"decoded_bytes":data.len(),"physical_bytes":f.compressed}),
+                );
+            }
+            Ok(data)
+        })();
+        span.result(result)
     }
     pub fn range(&self, offset: usize, length: usize) -> Result<Cow<'_, [u8]>> {
         let end = checked::add(offset, length)?;

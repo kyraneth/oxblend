@@ -2,7 +2,8 @@ use crate::edit_output::io;
 use crate::{Error, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{BufReader, Read, Seek, SeekFrom};
+mod structure;
 mod values;
 use std::path::Path;
 #[derive(Debug, Clone)]
@@ -34,10 +35,26 @@ pub struct Part {
 pub struct ExrHeader {
     pub version: u32,
     pub parts: Vec<Part>,
+    /// Deprecated 1.x alias of header_end (not the file size).
     pub extent: u64,
+    pub header_end: u64,
+    pub file_size: u64,
+    structure: serde_json::Value,
 }
 fn err(s: &str) -> Error {
     Error::new("exr_header", s)
+}
+fn truncated(s: &str) -> Error {
+    Error::new("exr_header_truncated", s)
+}
+fn exact(r: &mut impl Read, bytes: &mut [u8]) -> Result<()> {
+    r.read_exact(bytes).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            truncated("failed to fill whole buffer")
+        } else {
+            io(e)
+        }
+    })
 }
 fn i32le(b: &[u8]) -> Result<i32> {
     Ok(i32::from_le_bytes(b.try_into().map_err(|_| {
@@ -53,7 +70,7 @@ fn cstring<R: Read>(r: &mut R, max: usize) -> Result<Vec<u8>> {
         let mut b = [0];
         r.read_exact(&mut b).map_err(|e| {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                err(&format!(
+                truncated(&format!(
                     "expected NUL-terminated name, found EOF after {} name bytes",
                     out.len()
                 ))
@@ -124,19 +141,28 @@ fn read_channels(value: &[u8], max: usize) -> Result<Vec<Channel>> {
     Ok(channels)
 }
 pub fn read(path: &Path) -> Result<ExrHeader> {
+    read_for_scan(path).map_err(|e| {
+        if e.kind == "exr_header_truncated" {
+            err(&e.message)
+        } else {
+            e
+        }
+    })
+}
+pub(crate) fn read_for_scan(path: &Path) -> Result<ExrHeader> {
     crate::diagnostics::opened(path, || read_inner(path))
 }
 fn read_inner(path: &Path) -> Result<ExrHeader> {
-    let mut f = File::open(path).map_err(io)?;
-    let before = f.metadata().map_err(io)?;
+    let mut f = BufReader::new(File::open(path).map_err(io)?);
+    let before = f.get_ref().metadata().map_err(io)?;
     let length = before.len();
     if length < 8 {
-        return Err(err(&format!(
+        return Err(truncated(&format!(
             "expected 8-byte EXR prefix, found {length} bytes"
         )));
     }
     let mut prefix = [0; 8];
-    f.read_exact(&mut prefix).map_err(io)?;
+    exact(&mut f, &mut prefix)?;
     if prefix[..4] != [0x76, 0x2f, 0x31, 0x01] {
         return Err(err(&format!(
             "expected OpenEXR magic 20000630 (bytes 762f3101), found {} (bytes {})",
@@ -182,7 +208,7 @@ fn read_inner(path: &Path) -> Result<ExrHeader> {
                 )));
             }
             let mut n = [0; 4];
-            f.read_exact(&mut n).map_err(io)?;
+            exact(&mut f, &mut n)?;
             let n = i32le(&n)?;
             if n < 0 {
                 return Err(err(&format!(
@@ -195,7 +221,7 @@ fn read_inner(path: &Path) -> Result<ExrHeader> {
                 .checked_add(n as u64)
                 .ok_or_else(|| err(&format!("expected representable attribute end, found offset {offset} + size {n} overflow")))?;
             if end > length {
-                return Err(err(&format!(
+                return Err(truncated(&format!(
                     "attribute '{}': expected {n} bytes at offset {offset}, found only {} bytes before EOF",
                     crate::value::display_bytes(&name),
                     length.saturating_sub(offset)
@@ -203,8 +229,18 @@ fn read_inner(path: &Path) -> Result<ExrHeader> {
             }
             // Retain exactly this payload, including application metadata. No
             // decoder can read into the following attribute or pixel chunks.
-            let mut value = vec![0; n as usize];
-            f.read_exact(&mut value).map_err(io)?;
+            // A preview embeds RGBA samples inside the header. Retain only its
+            // dimension prefix; never interpret or materialize those pixels.
+            let retained = if kind == b"preview" {
+                (n as usize).min(8)
+            } else {
+                n as usize
+            };
+            let mut value = vec![0; retained];
+            exact(&mut f, &mut value)?;
+            if retained < n as usize {
+                f.seek(SeekFrom::Start(end)).map_err(io)?;
+            }
             if name == b"channels" {
                 if kind != b"chlist" {
                     return Err(err(&format!(
@@ -212,7 +248,7 @@ fn read_inner(path: &Path) -> Result<ExrHeader> {
                         crate::value::display_bytes(&kind)
                     )));
                 }
-                part.channels = read_channels(&value, max)?;
+                part.channels = read_channels(&value, max).map_err(|e| err(&e.message))?;
             }
             part.values.insert(name.clone(), value);
             part.attributes.push(Attribute {
@@ -262,20 +298,18 @@ fn read_inner(path: &Path) -> Result<ExrHeader> {
         }
     }
     let extent = f.stream_position().map_err(io)?;
-    let after = f.metadata().map_err(io)?;
-    if before.len() != after.len()
-        || before.modified().map_err(io)? != after.modified().map_err(io)?
-    {
-        return Err(Error::new(
-            "input_changed",
-            "EXR changed during header read",
-        ));
-    }
-    Ok(ExrHeader {
+    let mut header = ExrHeader {
         version,
         parts,
         extent,
-    })
+        header_end: extent,
+        file_size: length,
+        structure: serde_json::Value::Null,
+    };
+    header.structure = structure::inspect(f.get_ref(), &header)?;
+    // Use the shared descriptor/path capture-signature guard, including ctime.
+    crate::kernel_copy::check_source(f.get_ref(), path, &before)?;
+    Ok(header)
 }
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -448,7 +482,56 @@ impl ExrHeader {
         Ok(passes)
     }
     pub fn json(&self) -> serde_json::Value {
-        serde_json::json!({"version":self.version,"extent":self.extent,"header_complete":true,"pixel_integrity_verified":false,"parts":self.parts.iter().map(|p|serde_json::json!({"channels":p.channels.iter().map(|c|serde_json::json!({"name_hex":crate::value::hex(&c.name),"pixel_type":c.pixel_type,"linear":c.linear,"reserved":c.reserved,"sampling":c.sampling})).collect::<Vec<_>>(),"attributes":p.attributes.iter().map(|a|serde_json::json!({"name_hex":crate::value::hex(&a.name),"type_hex":crate::value::hex(&a.kind),"offset":a.offset,"length":a.length,"name":std::str::from_utf8(&a.name).ok(),"type":std::str::from_utf8(&a.kind).ok(),"decoded_value":p.values.get(&a.name).map(|b|values::decode(&a.kind,b,if self.version & 0x400 != 0 {255}else{31}))})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
+        use serde_json::json;
+        let max = if self.version & 0x400 != 0 { 255 } else { 31 };
+        let multipart = self.version & 0x1000 != 0;
+        let parts = self.parts.iter().map(|p| {
+            let mut result = json!({
+                "tiled":structure::tiled(p,self.version), "multipart":multipart,
+                "deep":structure::deep(p) || (!multipart && self.version&0x800!=0),
+                "placeholder_1x1":structure::placeholder(p),
+                "channels":p.channels.iter().map(|c|json!({
+                    "name":std::str::from_utf8(&c.name).ok(), "name_hex":crate::value::hex(&c.name),
+                    "pixel_type":c.pixel_type, "pixel_type_name":(["uint","half","float"][c.pixel_type as usize]),
+                    "linear":c.linear, "pLinear":c.linear!=0, "reserved":c.reserved,
+                    "sampling":c.sampling, "xSampling":c.sampling[0], "ySampling":c.sampling[1]
+                })).collect::<Vec<_>>(),
+                "attributes":p.attributes.iter().map(|a| {
+                    let decoded=p.values.get(&a.name).map(|b| {
+                        if a.kind==b"preview" && b.len()==8 {
+                            let width=u32::from_le_bytes(b[..4].try_into().unwrap()) as u64;
+                            let height=u32::from_le_bytes(b[4..].try_into().unwrap()) as u64;
+                            let expected=width.checked_mul(height).and_then(|n|n.checked_mul(4)).and_then(|n|n.checked_add(8));
+                            if expected!=Some(a.length as u64) {
+                                return json!({"status":"refused","decoded":false,"kind":"attribute_length",
+                                    "raw_prefix_hex":crate::value::hex(b),"declared_length":a.length,"expected_length":expected});
+                            }
+                        }
+                        values::decode(&a.kind,b,max)
+                    });
+                    json!({"name_hex":crate::value::hex(&a.name),"type_hex":crate::value::hex(&a.kind),
+                        "offset":a.offset,"length":a.length,"name":std::str::from_utf8(&a.name).ok(),
+                        "type":std::str::from_utf8(&a.kind).ok(),
+                        "decoded":decoded.as_ref().is_some_and(|v|v["status"]=="decoded"),"decoded_value":decoded})
+                }).collect::<Vec<_>>()
+            });
+            for name in ["dataWindow","displayWindow","compression","lineOrder","pixelAspectRatio","screenWindowCenter","screenWindowWidth"] {
+                if let Some(a)=p.attributes.iter().find(|a|a.name==name.as_bytes()) {
+                    let v=values::decode(&a.kind,&p.values[&a.name],max);
+                    result[name]=if matches!(name,"compression"|"lineOrder") {v["value"]["name"].clone()} else {v["value"].clone()};
+                }
+            }
+            result
+        }).collect::<Vec<_>>();
+        let mut report = json!({"version":self.version,"extent":self.extent,"header_end":self.header_end,
+            "file_size":self.file_size,"header_complete":true,"pixel_integrity_verified":false,
+            "tiled":self.parts.iter().any(|p|structure::tiled(p,self.version)),"multipart":multipart,
+            "deep":self.version&0x800!=0 || self.parts.iter().any(structure::deep),
+            "placeholder_1x1":self.parts.iter().any(structure::placeholder),"parts":parts});
+        if let Some(object) = self.structure.as_object() {
+            report.as_object_mut().unwrap().extend(object.clone());
+        }
+        report
     }
 }
 
@@ -460,6 +543,9 @@ mod composition_vectors {
         ExrHeader {
             version: 2,
             extent: 0,
+            header_end: 0,
+            file_size: 0,
+            structure: serde_json::Value::Null,
             parts: vec![Part {
                 channels: names
                     .iter()
@@ -813,6 +899,9 @@ mod composition_vectors {
             version: 2,
             parts: Vec::new(),
             extent: 0,
+            header_end: 0,
+            file_size: 0,
+            structure: serde_json::Value::Null,
         };
         assert_eq!(h.passes().unwrap_err().kind, "exr_unsupported");
     }

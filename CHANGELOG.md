@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0 — 2026-10-26
+
+- Full typed Python API, shared 1.4.0 crate/wheel version, selective raw pack windows.
+- Export the binding and reviewed manual trusted-publishing workflow.
+
 ## 1.3.3 — 2026-10-22
 
 - Correct serialized Blender path handling, pointer-array reads, literal glob

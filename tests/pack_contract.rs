@@ -2,7 +2,7 @@ use serde_json::Value;
 use std::{path::PathBuf, process::Command};
 
 #[test]
-fn trustworthy_missing_assets_publish_with_errors_but_unreadable_libraries_do_not() {
+fn permissive_missing_assets_publish_with_errors_and_strict_unreadable_libraries_do_not() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let work = std::env::temp_dir().join(format!("oxblend-pack-contract-{}", std::process::id()));
     std::fs::create_dir_all(&work).unwrap();
@@ -13,6 +13,7 @@ fn trustworthy_missing_assets_publish_with_errors_but_unreadable_libraries_do_no
             .arg("pack")
             .arg(&source)
             .arg(&out)
+            .arg("--permissive")
             .output()
             .unwrap();
         assert_eq!(result.status.code(), Some(2));
@@ -48,7 +49,20 @@ fn trustworthy_missing_assets_publish_with_errors_but_unreadable_libraries_do_no
         assert_eq!(result.status.code(), Some(2));
         let report: Value = serde_json::from_slice(&result.stdout).unwrap();
         assert_eq!(report["planning_complete"], false);
-        assert_eq!(report["errors"][0]["kind"], "incomplete_trace");
+        assert!(
+            report["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == "incomplete_trace")
+        );
+        assert!(
+            report["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["kind"] == "library_read")
+        );
         assert!(!out.exists());
         assert!(report["files"].as_array().unwrap().is_empty());
     }

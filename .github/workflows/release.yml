@@ -1,0 +1,450 @@
+# Oxblend release — the SOLE workflow that can ever publish to PyPI.
+#
+# Registered pending PyPI publisher:
+# kyraneth/oxblend -> .github/workflows/release.yml -> environment `pypi`.
+# This replaces python.yml: only publish-pypi holds id-token: write.
+# Declaring an environment does not configure reviewer protection. Verify the
+# live pypi protection rules before the first explicitly approved execution.
+#
+# Approval gates (settled rulings, not suggestions):
+# - The first run of this workflow needs Mario's explicit approval line.
+# - Any change to this file needs Mario's explicit approval line before it runs.
+# - Every PyPI publication needs its own explicit approval, given as
+#   `target: pypi` plus approval of the `pypi` environment. Default target is
+#   `build` — nothing publishes without both the exact reviewed hashes and the
+#   environment approval.
+#
+# Trigger: `workflow_dispatch` ONLY. No push, pull_request, schedule or
+# release trigger. There is deliberately no automatic path to PyPI. `ref` must
+# be a tag or a full commit SHA, never a branch, so the published bytes are
+# tied to an exact source revision.
+#
+# What the build proves (carried over from python.yml):
+# - The sdist is built first; the wheel is then built from the EXTRACTED sdist,
+#   proving the sdist is complete.
+# - The wheel filename must carry cp311-abi3 and an audited manylinux x86_64
+#   tag, never a hardcoded one; the GLIBC floor is printed from the binary.
+# - Packaging must not dirty the tree: exact Cargo.lock bytes are recorded and
+#   the tracked tree must be clean before and after.
+# - Reproducibility: SOURCE_DATE_EPOCH is the source commit timestamp,
+#   OXBLEND_*_BUILD_COMMIT are injected from the checked-out source commit,
+#   maturin is asserted to be exactly 1.15.0 (matching pyproject.toml), and
+#   /tmp/oxblend-src-<commit> matches the local extraction identity, while
+#   RUSTFLAGS --remap-path-prefix strips mapped rustc source paths. Actual CI
+#   artifact hashes must still be compared before publication approval.
+# - Every artifact leaves as ONE immutable upload identified by artifact ID;
+#   `publish-pypi` re-verifies the reviewed SHA-256 inputs against those exact
+#   bytes BEFORE any OIDC exchange or upload (sha256sum --check --strict).
+#
+# What CI does NOT do (documented gaps, not silent skips):
+# - No vendored crate downloads are configured (per L4 brief).
+# - No Blender run on GHA: headless Blender qualification needs a real Blender
+#   distro runner, which CI does not have. The full qualification corpus runs
+#   locally; see bindings/python/README.md.
+# - Installed-wheel tests are fresh-install smoke checks (import, versions,
+#   package data, bundled skill); the parity corpus is a local gate.
+# - npm: deliberately absent. No npm package exists in this lane.
+# - Two independent builds are compared for byte equality locally via
+#   bindings/python/scripts/build-release.sh (parent-run), not in CI.
+#
+# Least privilege: top-level permissions are empty; each job declares only what
+# it needs. Build/test jobs never hold id-token: write. Only the
+# environment-gated publish job holds id-token: write (PyPI trusted publishing
+# via OIDC — no stored API token or password anywhere in this file).
+#
+# Every `uses:` pin is a full commit SHA with its human-readable tag kept as a
+# trailing comment. Do not float these pins without Mario's approval.
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Release tag or full commit SHA (not a branch)
+        required: true
+        type: string
+      target:
+        description: Build only, or publish previously reviewed exact bytes
+        required: true
+        default: build
+        type: choice
+        options:
+          - build
+          - pypi
+      expected_wheel_sha256:
+        description: Required for pypi; lowercase SHA-256 from the reviewed build
+        type: string
+      expected_sdist_sha256:
+        description: Required for pypi; lowercase SHA-256 from the reviewed build
+        type: string
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-${{ inputs.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  TZ: UTC
+  MATURIN_VERSION: "1.15.0" # Must match bindings/python/pyproject.toml build-system.
+  TWINE_VERSION: "7.0.0" # Shared L20 tooling pin; runs `twine check --strict`.
+  RUST_TOOLCHAIN: "1.94.1" # rust-version in Cargo.toml files is "1.94".
+  BINDING_DIR: bindings/python
+  FLATTRACE_LEVEL: "2"
+
+jobs:
+  build:
+    name: sdist then wheel from sdist, audit, verify
+    runs-on: ubuntu-22.04 # Pinned glibc-floor image; x86_64 only.
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Validate release selection and approval hashes
+        id: selection
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+          RELEASE_TARGET: ${{ inputs.target }}
+          EXPECTED_WHEEL: ${{ inputs.expected_wheel_sha256 }}
+          EXPECTED_SDIST: ${{ inputs.expected_sdist_sha256 }}
+        run: |
+          set -eu
+          umask 002
+          if [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            printf 'ref=%s\n' "$RELEASE_REF" >> "$GITHUB_OUTPUT"
+          else
+            git check-ref-format "refs/tags/$RELEASE_REF"
+            printf 'ref=refs/tags/%s\n' "$RELEASE_REF" >> "$GITHUB_OUTPUT"
+          fi
+          case "$RELEASE_TARGET" in
+            build) ;;
+            pypi)
+              [[ "$EXPECTED_WHEEL" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$EXPECTED_SDIST" =~ ^[0-9a-f]{64}$ ]]
+              ;;
+            *) echo "unknown target: $RELEASE_TARGET"; exit 1 ;;
+          esac
+
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.selection.outputs.ref }}
+          persist-credentials: false
+
+      - name: Record exact source, commit timestamp and reproducible flags
+        run: |
+          set -eu
+          umask 002
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          # Maturin honours SOURCE_DATE_EPOCH for archive member timestamps.
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          # build.rs embeds these into the binaries; the wheel is built from
+          # the git-less extracted sdist, so injection must happen here.
+          printf 'OXBLEND_BUILD_COMMIT=%s\n' "$SOURCE_COMMIT" >> "$GITHUB_ENV"
+          printf 'OXBLEND_BINDING_BUILD_COMMIT=%s\n' "$SOURCE_COMMIT" >> "$GITHUB_ENV"
+          # Strip build paths/identity (checkout dir, cargo home, runner temp,
+          # home) so compiled path identity is independent of the machine.
+          # Last matching rustc remap wins: general prefixes before specific.
+          printf 'RUSTFLAGS=--remap-path-prefix=%s=<home> --remap-path-prefix=%s=<tmp> --remap-path-prefix=%s=<cargo-home> --remap-path-prefix=%s=<oxblend-src>\n' \
+            "$HOME" "$RUNNER_TEMP" "${CARGO_HOME:-$HOME/.cargo}" "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'Source commit: %s\n' "$SOURCE_COMMIT"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+
+      - name: Record lock baseline and clean-tree check
+        run: |
+          set -eu
+          mkdir -p "${RUNNER_TEMP}/lock-baseline"
+          cp Cargo.lock "${RUNNER_TEMP}/lock-baseline/Cargo.lock.orig"
+          cp "${BINDING_DIR}/Cargo.lock" "${RUNNER_TEMP}/lock-baseline/binding-Cargo.lock.orig"
+          sha256sum Cargo.lock "${BINDING_DIR}/Cargo.lock" | tee "${RUNNER_TEMP}/lock-baseline/sha256.txt"
+          if [ -n "$(git status --porcelain | grep -v '^??' || true)" ]; then
+            echo "FAIL: tracked tree is not clean at job start:"
+            git status --porcelain | grep -v '^??'
+            exit 1
+          fi
+
+      - name: Set up CPython 3.11 (abi3 floor)
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # Exact patch pin: `target: pypi` rebuilds and must hash-equal the
+          # reviewed build, so the build interpreter may not float.
+          python-version: "3.11.14"
+
+      - name: Install pinned Rust toolchain
+        run: |
+          set -eu
+          rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal
+          rustup default "${RUST_TOOLCHAIN}"
+          rustc --version
+          cargo --version
+
+      - name: Install and assert pinned maturin
+        run: |
+          set -eu
+          python -m pip install "maturin==${MATURIN_VERSION}"
+          python -m maturin --version
+          # Assert the pinned build backend, the analogue of the mirror's
+          # uv_build assertion: a release commit must carry the pin.
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          config = tomllib.loads(Path('bindings/python/pyproject.toml').read_text())
+          assert config['build-system'] == {
+              'requires': ['maturin==1.15.0'], 'build-backend': 'maturin'
+          }, 'Select a release commit with the reproducible build configuration'
+          PY
+
+      - name: Build and normalize sdist
+        run: |
+          set -euo pipefail
+          python bindings/python/tests/metadata_gate.py
+          mkdir -p dist/sdist "${RUNNER_TEMP}/maturin-sdist"
+          python -m maturin sdist --manifest-path "${BINDING_DIR}/Cargo.toml" --out "${RUNNER_TEMP}/maturin-sdist"
+          raw_sdists=("${RUNNER_TEMP}/maturin-sdist"/*.tar.gz)
+          test "${#raw_sdists[@]}" -eq 1
+          python bindings/python/scripts/normalize_sdist.py "${raw_sdists[0]}" \
+            "dist/sdist/$(basename "${raw_sdists[0]}")" > dist/normalization.json
+          ls -la dist/sdist
+
+      - name: Build wheel from the extracted sdist
+        run: |
+          set -eu
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          work="/tmp/oxblend-src-$SOURCE_COMMIT"
+          # Match build-release.sh; refuse an existing extraction without deleting it.
+          mkdir -- "$work"
+          trap 'rm -rf -- "$work"' EXIT
+          python bindings/python/scripts/guidance.py --check
+          tar -xzf dist/sdist/*.tar.gz -C "$work"
+          sdist_dir="$(echo "$work"/*/)"
+          echo "building from extracted sdist: ${sdist_dir}"
+          test -f "${sdist_dir}pyproject.toml"
+          # The PEP 517 project is the extracted root, not the nested Rust
+          # crate. Direct --manifest-path build here can silently emit a
+          # Rust-only wheel without the oxblend facade/data.
+          (
+            cd "${sdist_dir}"
+            export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=${sdist_dir%/}=<oxblend-src>"
+            python bindings/python/scripts/guidance.py --check
+            python -m maturin pep517 build-wheel --profile release --locked \
+              --interpreter python3.11 \
+              --out "${GITHUB_WORKSPACE}/dist/wheels"
+            python bindings/python/scripts/notices.py check
+          )
+          ls -la "${GITHUB_WORKSPACE}/dist/wheels"
+
+      - name: Audit wheel linkage and glibc symbols
+        run: |
+          set -eu
+          wheel="$(echo dist/wheels/*.whl)"
+          test "$(echo dist/wheels/*.whl | wc -w)" -eq 1
+          rm -rf "${RUNNER_TEMP}/wheel-unpack"
+          mkdir -p "${RUNNER_TEMP}/wheel-unpack"
+          python -c "import zipfile; zipfile.ZipFile('${wheel}').extractall('${RUNNER_TEMP}/wheel-unpack')"
+          so="$(find "${RUNNER_TEMP}/wheel-unpack" -name '_native*.so' | head -n 1)"
+          test -n "${so}"
+          echo "extension module: ${so}"
+          echo "--- NEEDED entries (actual linkage) ---"
+          readelf -d -W "${so}" | grep -E 'NEEDED|SONAME' || true
+          echo "--- GLIBC symbol versions referenced (actual floor) ---"
+          readelf --dyn-syms -W "${so}" | grep -o 'GLIBC_[0-9][0-9.]*' | sort -Vu | tee "${RUNNER_TEMP}/glibc-refs.txt" || true
+          echo "--- highest referenced GLIBC ---"
+          sort -V "${RUNNER_TEMP}/glibc-refs.txt" | tail -n 1 || true
+
+      - name: Verify locks unchanged and tree undirtied
+        run: |
+          set -eu
+          # Cargo package may normalize only the root lock's entry ordering.
+          # Accept that known side effect only when the full parsed lock data
+          # is identical after sorting package/dependency array order. Restore
+          # the exact pre-packaging bytes explicitly, then check the tree.
+          python - <<'PY'
+          import os, pathlib, shutil, tomllib
+          original = pathlib.Path(os.environ["RUNNER_TEMP"]) / "lock-baseline/Cargo.lock.orig"
+          current = pathlib.Path("Cargo.lock")
+          def canonical(path):
+              data = tomllib.loads(path.read_text())
+              packages = data.get("package", [])
+              for package in packages:
+                  if "dependencies" in package:
+                      package["dependencies"] = sorted(package["dependencies"])
+              data["package"] = sorted(packages, key=lambda p: (p["name"], p["version"], p.get("source", "")))
+              return data
+          if canonical(original) != canonical(current):
+              raise SystemExit("FAIL: root lock dependency/metadata graph changed")
+          if original.read_bytes() != current.read_bytes():
+              print("Restoring graph-identical Cargo lock ordering normalization")
+              shutil.copyfile(original, current)
+          PY
+          fail=0
+          if ! cmp -s Cargo.lock "${RUNNER_TEMP}/lock-baseline/Cargo.lock.orig"; then
+            echo "FAIL: root Cargo.lock was normalized/rewritten during packaging."
+            fail=1
+          fi
+          if ! cmp -s "${BINDING_DIR}/Cargo.lock" "${RUNNER_TEMP}/lock-baseline/binding-Cargo.lock.orig"; then
+            echo "FAIL: binding Cargo.lock was normalized/rewritten during packaging."
+            fail=1
+          fi
+          if [ -n "$(git status --porcelain | grep -v '^??' || true)" ]; then
+            echo "FAIL: packaging dirtied tracked files:"
+            git status --porcelain | grep -v '^??'
+            fail=1
+          fi
+          if [ "${fail}" -ne 0 ]; then
+            # Restore exact bytes; never leave a silently dirty tree behind.
+            # On a fresh-runner checkout the only tracked dirt possible is
+            # packaging-introduced, so restoring tracked files is safe here.
+            cp "${RUNNER_TEMP}/lock-baseline/Cargo.lock.orig" Cargo.lock
+            cp "${RUNNER_TEMP}/lock-baseline/binding-Cargo.lock.orig" "${BINDING_DIR}/Cargo.lock"
+            git checkout -- .
+            exit 1
+          fi
+          echo "PASS: lock bytes identical, no tracked files dirtied."
+
+      - name: Record source commit and distribution hashes
+        run: |
+          set -eu
+          cp "$RUNNER_TEMP/source-commit.txt" dist/source-commit.txt
+          (cd dist && sha256sum sdist/*.tar.gz wheels/*.whl | tee SHA256SUMS)
+          {
+            echo '## Release build (target build — nothing published)'
+            echo
+            printf 'Source commit: `%s`\n\n' "$(git rev-parse HEAD)"
+            echo 'Inputs for a later `target: pypi` dispatch of this same ref:'
+            echo
+            echo '```text'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify release distributions (shared packaging gate)
+        run: |
+          set -eu
+          python "${BINDING_DIR}/scripts/check_release_dist.py" --dist dist --sha256sums dist/SHA256SUMS
+
+      - name: twine check metadata
+        run: |
+          set -eu
+          python -m pip install "twine==${TWINE_VERSION}"
+          python -m twine check --strict dist/sdist/*.tar.gz dist/wheels/*.whl
+
+      - name: Upload immutable build artifact
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: oxblend-dist
+          path: dist/
+          if-no-files-found: error
+
+  test:
+    name: fresh-install smoke (CPython ${{ matrix.python-version }})
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.11", "3.13"]
+    permissions:
+      contents: read
+      actions: read # Download this run's immutable artifact only.
+    steps:
+      - name: Set up CPython ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download this build's immutable artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+          merge-multiple: true
+
+      - name: Enable native test tracing
+        run: echo "FLATTRACE_DIR=${RUNNER_TEMP}/oxblend-flattrace" >> "${GITHUB_ENV}"
+
+      - name: Fresh venv install and smoke checks
+        run: |
+          set -eu
+          ls -la dist dist/sdist dist/wheels
+          test "$(echo dist/wheels/*.whl | wc -w)" -eq 1
+          whl="$(echo dist/wheels/*.whl)"
+          python -m venv --clear "${RUNNER_TEMP}/venv-test"
+          "${RUNNER_TEMP}/venv-test/bin/python" -m pip install --no-deps "${whl}"
+          "${RUNNER_TEMP}/venv-test/bin/python" - <<'EOF'
+          import sys, oxblend
+          from pathlib import Path
+          print("sys.version:", sys.version)
+          print("module:", oxblend.__file__)
+          print("native:", oxblend._native.__file__)
+          print("version:", oxblend.__version__)
+          print("engine:", oxblend.engine_version)
+          package = Path(oxblend.__file__).parent
+          for name in ("py.typed", "_native.pyi", "THIRD-PARTY-NOTICES.txt"):
+              p = package / name
+              assert p.is_file(), name
+              if name != "py.typed": assert p.stat().st_size > 0, name
+          notices = (package / "THIRD-PARTY-NOTICES.txt").read_bytes()
+          assert notices.startswith(b"THIRD-PARTY NOTICES\n"), "notices prefix"
+          assert oxblend.catalog(), "native catalog call"
+          EOF
+          "${RUNNER_TEMP}/venv-test/bin/python" -m oxblend skill print > "${RUNNER_TEMP}/skill.txt"
+          head -n 5 "${RUNNER_TEMP}/skill.txt"
+
+      - name: Retain native test traces
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-traces-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/oxblend-flattrace
+          if-no-files-found: error
+
+  publish-pypi:
+    name: publish reviewed bytes to PyPI (trusted publishing)
+    needs: [build, test]
+    if: ${{ inputs.target == 'pypi' }}
+    runs-on: ubuntu-22.04
+    environment: pypi # Must have reviewer protection configured before activation.
+    permissions:
+      id-token: write # PyPI trusted publishing (OIDC). No stored token.
+    steps:
+      - name: Download this build's immutable artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify approved Python bytes before OIDC or upload
+        env:
+          EXPECTED_WHEEL: ${{ inputs.expected_wheel_sha256 }}
+          EXPECTED_SDIST: ${{ inputs.expected_sdist_sha256 }}
+        run: |
+          set -eu
+          umask 002
+          [[ "$EXPECTED_WHEEL" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_SDIST" =~ ^[0-9a-f]{64}$ ]]
+          wheels=(dist/wheels/*.whl)
+          sdists=(dist/sdist/*.tar.gz)
+          [[ ${#wheels[@]} == 1 && -f "${wheels[0]}" ]]
+          [[ ${#sdists[@]} == 1 && -f "${sdists[0]}" ]]
+          printf '%s  %s\n' "$EXPECTED_WHEEL" "${wheels[0]}" | sha256sum --check --strict -
+          printf '%s  %s\n' "$EXPECTED_SDIST" "${sdists[0]}" | sha256sum --check --strict -
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.9.27'
+          enable-cache: false
+
+      - name: Publish exact approved Python files with PyPI trusted publishing
+        run: |
+          set -eu
+          uv publish --trusted-publishing always dist/wheels/*.whl dist/sdist/*.tar.gz

@@ -36,6 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /// specification's little-endian words regardless of host endianness; the
 /// seek-frame field takes `digest() as u32` (least significant 32 bits) in the
 /// container-defined byte order at its own site.
+#[derive(Clone, Copy)]
 pub(crate) struct Xxh64 {
     v1: u64,
     v2: u64,

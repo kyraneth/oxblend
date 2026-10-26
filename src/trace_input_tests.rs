@@ -32,7 +32,12 @@ impl Drop for Owned {
 #[test]
 fn index_window_is_borrowed_and_truncation_still_fails_boundary() {
     let file = Owned::new(b"abcdefghijklmnopqrstuvwxyz");
-    let input = Input::open(&file.0).unwrap();
+    let input = Input::open(
+        &file.0,
+        &crate::session::DiagSink::test_sink(),
+        &std::env::temp_dir(),
+    )
+    .unwrap();
     input
         .scan(|reader| {
             let mut first = [0; 3];
@@ -59,7 +64,12 @@ fn index_window_is_borrowed_and_truncation_still_fails_boundary() {
 #[test]
 fn exact_miss_capture_and_path_replacement_guard() {
     let file = Owned::new(b"abcdefghijklmnopqrstuvwxyz");
-    let input = Input::open(&file.0).unwrap();
+    let input = Input::open(
+        &file.0,
+        &crate::session::DiagSink::test_sink(),
+        &std::env::temp_dir(),
+    )
+    .unwrap();
     input
         .scan(|reader| {
             reader.seek(SeekFrom::Start(20)).unwrap();
@@ -109,7 +119,12 @@ fn blocks_scans_ranges_and_final_boundary_guard_every_source_kind() {
         for when in ["start", "end"] {
             for truncate in [false, true] {
                 let file = Owned::new(&bytes);
-                let input = Input::open_blocks(&file.0).unwrap();
+                let input = Input::open_blocks(
+                    &file.0,
+                    &crate::session::DiagSink::test_sink(),
+                    &std::env::temp_dir(),
+                )
+                .unwrap();
                 assert_eq!(input.len(), blend.len());
                 assert_eq!(input.range(0, 7).unwrap().as_ref(), b"BLENDER");
                 let change = || {
@@ -162,7 +177,13 @@ fn blocks_stream_admission_checks_checksum_tail_and_structure() {
         let bytes = gzip.finish().unwrap();
         if tail {
             assert_eq!(
-                Input::open_blocks(&Owned::new(&bytes).0).unwrap_err().kind,
+                Input::open_blocks(
+                    &Owned::new(&bytes).0,
+                    &crate::session::DiagSink::test_sink(),
+                    &std::env::temp_dir()
+                )
+                .unwrap_err()
+                .kind,
                 "invalid_block"
             );
         } else {
@@ -170,13 +191,23 @@ fn blocks_stream_admission_checks_checksum_tail_and_structure() {
             let end = bad.len();
             bad[end - 8] ^= 1;
             assert_eq!(
-                Input::open_blocks(&Owned::new(&bad).0).unwrap_err().kind,
+                Input::open_blocks(
+                    &Owned::new(&bad).0,
+                    &crate::session::DiagSink::test_sink(),
+                    &std::env::temp_dir()
+                )
+                .unwrap_err()
+                .kind,
                 "compression"
             );
             assert_eq!(
-                Input::open_blocks(&Owned::new(&bytes[..end - 1]).0)
-                    .unwrap_err()
-                    .kind,
+                Input::open_blocks(
+                    &Owned::new(&bytes[..end - 1]).0,
+                    &crate::session::DiagSink::test_sink(),
+                    &std::env::temp_dir()
+                )
+                .unwrap_err()
+                .kind,
                 "compression"
             );
         }
@@ -202,7 +233,12 @@ fn damaged_seek_table_falls_back_explicitly_to_checked_spill() {
     seek.extend(table);
     *seek.last_mut().unwrap() ^= 1;
     let source = Owned::new(&seek);
-    let input = Input::open(&source.0).unwrap();
+    let input = Input::open(
+        &source.0,
+        &crate::session::DiagSink::test_sink(),
+        &std::env::temp_dir(),
+    )
+    .unwrap();
     assert_eq!(input.stats()["mode"], "checked_full_streaming_spill");
     assert_eq!(
         input.stats()["seek_table"],
@@ -222,14 +258,37 @@ fn compressed_spill_requires_complete_gzip_checksum() {
     encoder.write_all(&blend).unwrap();
     let bytes = encoder.finish().unwrap();
     let file = Owned::new(&bytes);
-    let input = Input::open(&file.0).unwrap();
+    let input = Input::open(
+        &file.0,
+        &crate::session::DiagSink::test_sink(),
+        &std::env::temp_dir(),
+    )
+    .unwrap();
     assert_eq!(input.range(0, 7).unwrap().as_ref(), b"BLENDER");
     assert_eq!(input.stats()["mode"], "checked_full_streaming_spill");
     let mut broken = bytes.clone();
     let end = broken.len();
     broken[end - 8] ^= 1;
     let file = Owned::new(&broken);
-    assert_eq!(Input::open(&file.0).unwrap_err().kind, "compression");
+    assert_eq!(
+        Input::open(
+            &file.0,
+            &crate::session::DiagSink::test_sink(),
+            &std::env::temp_dir()
+        )
+        .unwrap_err()
+        .kind,
+        "compression"
+    );
     let file = Owned::new(&bytes[..bytes.len() - 1]);
-    assert_eq!(Input::open(&file.0).unwrap_err().kind, "compression");
+    assert_eq!(
+        Input::open(
+            &file.0,
+            &crate::session::DiagSink::test_sink(),
+            &std::env::temp_dir()
+        )
+        .unwrap_err()
+        .kind,
+        "compression"
+    );
 }

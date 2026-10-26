@@ -4,44 +4,55 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
 pub(crate) fn verify_output(file: &File, family: &str, decoded_length: usize) -> Result<()> {
-    let mut clone = file.try_clone().map_err(io)?;
-    clone.seek(SeekFrom::Start(0)).map_err(io)?;
-    let failed = std::cell::Cell::new(false);
-    let source = crate::input::Source {
-        file: clone,
-        failed: &failed,
-    };
-    let decode_error = |e: std::io::Error| {
-        Error::new(
-            if failed.get() {
-                "io"
-            } else {
-                "output_compression"
-            },
-            e.to_string(),
-        )
-    };
-    let mut decoded: Box<dyn Read + '_> = match family {
-        "gzip" => Box::new(flate2::read::MultiGzDecoder::new(source)),
-        "zstd" => Box::new(zstd::stream::read::Decoder::new(source).map_err(decode_error)?),
-        _ => {
+    let span = crate::diagnostics::Span::new(
+        "decode",
+        if crate::diagnostics::enabled() {
+            serde_json::json!({"format":family,"scope":"output_decoder_verification","decoded_bytes":decoded_length})
+        } else {
+            serde_json::Value::Null
+        },
+    );
+    let result = (|| {
+        let mut clone = file.try_clone().map_err(io)?;
+        clone.seek(SeekFrom::Start(0)).map_err(io)?;
+        let failed = std::cell::Cell::new(false);
+        let source = crate::input::Source {
+            file: clone,
+            failed: &failed,
+        };
+        let decode_error = |e: std::io::Error| {
+            Error::new(
+                if failed.get() {
+                    "io"
+                } else {
+                    "output_compression"
+                },
+                e.to_string(),
+            )
+        };
+        let mut decoded: Box<dyn Read + '_> = match family {
+            "gzip" => Box::new(flate2::read::MultiGzDecoder::new(source)),
+            "zstd" => Box::new(zstd::stream::read::Decoder::new(source).map_err(decode_error)?),
+            _ => {
+                return Err(Error::new(
+                    "output_compression",
+                    "decoder check is for compressed output",
+                ));
+            }
+        };
+        let total = std::io::copy(&mut decoded, &mut std::io::sink()).map_err(decode_error)?;
+        if total
+            != u64::try_from(decoded_length)
+                .map_err(|_| Error::new("overflow", "decoded output length"))?
+        {
             return Err(Error::new(
-                "output_compression",
-                "decoder check is for compressed output",
+                "output_decode_length",
+                "decoder output length differs from immutable decoded body",
             ));
         }
-    };
-    let total = std::io::copy(&mut decoded, &mut std::io::sink()).map_err(decode_error)?;
-    if total
-        != u64::try_from(decoded_length)
-            .map_err(|_| Error::new("overflow", "decoded output length"))?
-    {
-        return Err(Error::new(
-            "output_decode_length",
-            "decoder output length differs from immutable decoded body",
-        ));
-    }
-    Ok(())
+        Ok(())
+    })();
+    span.result(result)
 }
 #[cfg(test)]
 mod tests {

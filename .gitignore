@@ -8,3 +8,6 @@
 *.blend
 *.blend1
 *.blend2
+# Committed test fixtures are explicit; the blanket rule above must not
+# silently drop them (L18: concrete-tile blends were ignored at first add).
+!tests/fixtures/**/*.blend

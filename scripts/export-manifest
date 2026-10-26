@@ -9,11 +9,12 @@ from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--json',action='store_true');a=p.parse_args()
 root=Path(__file__).resolve().parents[1]
 tracked=subprocess.run(['git','ls-files','-z'],cwd=root,check=True,capture_output=True).stdout.decode().split('\0')
-exact={'build.rs','CHANGELOG.md','Cargo.toml','Cargo.lock','LICENSE','NOTICE','README.md','AGENTS.md','CONTRIBUTING.md','.gitignore','scripts/qualify.sh','scripts/export-manifest','integration/file_ops_kit.py','THIRD-PARTY-NOTICES','deny.toml','scripts/third-party-notices','scripts/licence-gate.sh','scripts/no-network-check.sh','scripts/check-stability.py','scripts/release-build','flattrace-events.json','scripts/check-flattrace.py'}
-prefixes=('scripts/','assets/logo/','src/','newtests/','docs/','skills/oxblend/','tests/fixtures/','tests/support/')
+exact={'tests/query-native-differences.json','CHANGELOG.md','build.rs','assets/template-5.2.1.blend','.github/workflows/release.yml','Cargo.toml','Cargo.lock','LICENSE','NOTICE','README.md','AGENTS.md','CONTRIBUTING.md','.gitignore','scripts/qualify.sh','scripts/export-manifest','integration/file_ops_kit.py','THIRD-PARTY-NOTICES','deny.toml','scripts/third-party-notices','scripts/licence-gate.sh','scripts/no-network-check.sh','scripts/check-stability.py','scripts/release-build','flattrace-events.json','scripts/check-flattrace.py'}
+prefixes=('bindings/python/','scripts/','assets/logo/','src/','newtests/','docs/','skills/oxblend/','tests/fixtures/','tests/support/')
 selected=[]
 for name in tracked:
-    if not name or name=='docs/RELEASE-CHECKLIST.md':continue
+    if not name or name in {'scripts/make-public-commit.sh','docs/RELEASE-CHECKLIST.md','docs/L8-ACCEPTANCE.md','docs/L8-REPORT-REVIEW.md'}:continue
+    if any(part in ('target','__pycache__','.venv','dist','dist-release') for part in Path(name).parts) or name.endswith(('.pyc','.so','.whl')):continue
     if name in exact or name.startswith(prefixes) or name.startswith(('tests/','examples/')) and '/' not in name.split('/',1)[1] and name.endswith('.rs'):
         path=root/name
         if not path.is_file() or path.is_symlink():raise RuntimeError('missing or symlink selection '+name)

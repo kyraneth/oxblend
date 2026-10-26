@@ -14,7 +14,8 @@ fn options() -> TraceOptions {
 fn cross_id_addresses_resolve_in_trace_and_overrides() {
     let f = path("cross-id.blend");
     let t = trace(&f, options()).unwrap();
-    assert!(t.complete, "{:?}", t.errors);
+    assert!(!t.complete); // #31: declared cache paths are absent.
+    assert_eq!(t.json()["missing_path_count"], 2);
     assert!(t.errors.is_empty());
     assert_eq!(
         t.usages
@@ -245,7 +246,8 @@ fn material_pointer_table_uses_data_then_id_without_fallback() {
         TraceOptions::new(TraceMode::Recursive, PointerMode::Strict),
     )
     .unwrap();
-    assert!(t.complete, "{:?}", t.errors);
+    assert!(!t.complete); // #31: declared cache paths are absent.
+    assert_eq!(t.json()["missing_path_count"], 2);
     assert!(t.errors.is_empty());
     assert_eq!(t.usages.len(), 2);
     let selected = trace(

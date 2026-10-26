@@ -1,18 +1,23 @@
 use crate::checked::{add, mul};
 use crate::edit::{EditOptions, Span};
 use crate::edit_output::{AtomicOutput, io, refuse_existing, sync_end};
-use crate::input::{PackInputs, Snapshot};
+use crate::input::Snapshot;
 use crate::value::{PathStep, hex};
 use crate::{BlendFile, Error, Result};
 use serde_json::{Value as Json, json};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+
+mod idprop;
+#[cfg(test)]
+#[path = "typed_edit/idprop_tests.rs"]
+mod idprop_tests;
+pub use idprop::{IdpropString, plan_strings};
 
 pub struct EditSnapshot {
     input: PathBuf,
-    captured: Rc<Snapshot>,
+    captured: Snapshot,
     owners: Vec<Option<usize>>,
 }
 #[derive(Clone)]
@@ -99,7 +104,9 @@ pub(crate) fn owner_runs(f: &BlendFile) -> Result<Vec<Option<usize>>> {
     Ok(result)
 }
 pub fn snapshot(input: &Path) -> Result<EditSnapshot> {
-    let captured = PackInputs::new(&[input.to_path_buf()])?.get(input)?;
+    // Own the common captured-input snapshot directly: parsing, proof and
+    // writer admission are unchanged, without a shared reader cache.
+    let captured = crate::session::capture_one(input)?;
     let f = &captured.reader;
     if f.header().version < 502 || !f.header().little_endian {
         return Err(Error::new(
@@ -626,11 +633,16 @@ fn library_context(p: &EditPlan<'_>, output: &Path) -> Result<()> {
             Error::new("string_termination", "new Library path lacks bounded NUL")
         })?;
         let new = &replacement[..end];
-        same_library_content(s, old, new, output)?;
+        same_library_content(&s.input, old, new, output)?;
     }
     Ok(())
 }
-fn same_library_content(s: &EditSnapshot, old: &[u8], new: &[u8], output: &Path) -> Result<()> {
+pub(crate) fn same_library_content(
+    input: &Path,
+    old: &[u8],
+    new: &[u8],
+    output: &Path,
+) -> Result<()> {
     if old.is_empty() || new.is_empty() {
         return Err(Error::new(
             "profile_library",
@@ -638,7 +650,7 @@ fn same_library_content(s: &EditSnapshot, old: &[u8], new: &[u8], output: &Path)
         ));
     }
 
-    let a = crate::trace::resolve(&s.input, old);
+    let a = crate::trace::resolve(input, old);
     let b = crate::trace::resolve(output, new);
     if a == b {
         return Ok(());

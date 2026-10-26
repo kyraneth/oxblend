@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "oxblend.query-1.schema.json",
+  "title": "Oxblend saved-record query, schema 1",
+  "type": "object",
+  "required": ["schema", "catalog_revision", "basis", "source_observation", "selection", "requested_coverage", "errors", "rows"],
+  "properties": {
+    "schema": {"const": "oxblend.query/1"},
+    "catalog_revision": {"type": "string", "minLength": 1},
+    "basis": {"const": "saved_controls_not_evaluated_results"},
+    "source_observation": {
+      "type": "object",
+      "required": ["input_version", "identity", "subversion", "complete", "errors"],
+      "properties": {
+        "input_version": {"type": "integer"},
+        "subversion": {"type": ["integer", "null"]},
+        "path": {"type": ["string", "null"]},
+        "path_hex": {"$ref": "#/$defs/hex"},
+        "identity": {"type": "object"},
+        "complete": {"type": "boolean"},
+        "errors": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "selection": {"type": "object", "required": ["type"], "properties": {"type": {"type": "string"}}},
+    "requested_coverage": {"type": "object", "required": ["complete"], "properties": {"complete": {"type": "boolean"}}},
+    "errors": {"type": "array", "items": {"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string"}}}},
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_local_ref", "id", "content_status", "values"],
+        "properties": {
+          "source_local_ref": {"$ref": "#/$defs/localRef"},
+          "id": {"oneOf": [{"type": "null"}, {"allOf": [{"$ref": "#/$defs/idRef"}, {"required": ["name_hex"], "properties": {"name_hex": {"$ref": "#/$defs/hex"}}}]}]},
+          "content_status": {"enum": ["local", "linked_reference"]},
+          "values": {"type": "object", "additionalProperties": {"$ref": "#/$defs/outcome"}}
+        }
+      }
+    },
+    "storage_evidence": {"type": "object"},
+    "graphs": {
+      "type": "object",
+      "description": "Optional report-level graphs. collection.graph is independently versioned as oxblend.collection_graph/1; row values reference its single flat body.",
+      "properties": {"collection.graph": {"$ref": "#/$defs/collectionGraph"}},
+      "additionalProperties": {"type": "object"}
+    }
+  },
+  "$defs": {
+    "collectionGraph": {
+      "type": "object",
+      "required": ["schema", "graph_ref", "basis", "sources", "records", "edges", "diagnostics", "coverage", "complete", "limits"],
+      "properties": {
+        "schema": {"const": "oxblend.collection_graph/1"},
+        "graph_ref": {"const": "collection.graph"},
+        "basis": {"const": "saved_collection_edges_not_evaluated_visibility"},
+        "complete": {"type": "boolean"},
+        "sources": {"type": "array", "items": {
+          "type": "object", "required": ["key", "role", "lexical_path", "path_hex", "provenance", "requests"],
+          "properties": {"key": {"type": "string"}, "role": {"enum": ["root", "library"]}, "lexical_path": {"type": ["string", "null"]}, "path_hex": {"oneOf": [{"$ref": "#/$defs/hex"}, {"type": "null"}]}, "provenance": {"type": "array"}, "requests": {"type": "array"}}
+        }},
+        "records": {"type": "array", "items": {
+          "type": "object", "required": ["key", "source", "source_local_ref", "kind", "id", "data", "ownership", "ownership_scope"],
+          "properties": {"key": {"type": "string"}, "source": {"type": "string"}, "source_local_ref": {"$ref": "#/$defs/localRef"}, "kind": {"enum": ["Collection", "Object"]}, "id": {"oneOf": [{"$ref": "#/$defs/idRef"}, {"type": "null"}]}, "data": {"type": "object"}, "ownership": {"type": "string"}, "ownership_scope": {"const": "containing_saved_file"}}
+        }},
+        "edges": {"type": "array", "items": {
+          "type": "object", "required": ["from", "kind", "ordinal", "to", "resolution"],
+          "properties": {"from": {"type": "string"}, "kind": {"enum": ["collection_child", "collection_object"]}, "ordinal": {"type": "integer", "minimum": 0}, "to": {"type": ["string", "null"]}, "resolution": {"type": "string"}}
+        }},
+        "diagnostics": {"type": "array", "items": {"type": "object", "required": ["status", "source", "field", "kind", "message"], "properties": {"status": {"const": "unavailable"}, "source": {"type": "string"}, "field": {"type": "string"}, "kind": {"type": "string"}, "message": {"type": "string"}}}},
+        "coverage": {"type": "object", "required": ["record_count", "edge_count", "unresolved_edge_count"], "properties": {"record_count": {"type": "integer", "minimum": 0}, "edge_count": {"type": "integer", "minimum": 0}, "unresolved_edge_count": {"type": "integer", "minimum": 0}}},
+        "limits": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "hex": {"type": "string", "pattern": "^(?:[0-9a-f]{2})*$"},
+    "localRef": {"type": "object", "required": ["block_index", "element"], "properties": {"block_index": {"type": "integer", "minimum": 0}, "element": {"type": "integer", "minimum": 0}}},
+    "idRef": {
+      "type": "object", "required": ["kind", "name", "library"],
+      "properties": {
+        "kind": {"type": "string"},
+        "name": {"type": ["string", "null"]},
+        "library": {"oneOf": [{"type": ["string", "null"]}, {"type": "object", "required": ["kind", "hex", "utf8"], "properties": {"kind": {"const": "bytes"}, "hex": {"$ref": "#/$defs/hex"}, "utf8": {"type": "null"}}}]}
+      }
+    },
+    "outcome": {
+      "oneOf": [
+        {"type": "object", "required": ["status", "value", "evidence"], "properties": {"status": {"const": "available"}, "evidence": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["concept", "support", "disk_paths"], "properties": {"concept": {"type": "string"}, "support": {"const": "qualified"}, "disk_paths": {"type": "array", "minItems": 1, "items": {"type": "string"}}}}}}},
+        {"type": "object", "required": ["status", "kind", "context", "next_action"], "properties": {"status": {"const": "unavailable"}, "kind": {"type": "string"}, "context": {"type": "object"}, "next_action": {"type": "object"}}}
+      ]
+    }
+  }
+}

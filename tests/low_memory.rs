@@ -38,6 +38,96 @@ fn framed(parts: &[(&[u8], u32)]) -> Vec<u8> {
     out.extend(table);
     out
 }
+
+#[test]
+fn compressed_inner_decode_counts_reconcile_without_l1_span_pairs() {
+    use serde_json::Value;
+    let path =
+        std::env::temp_dir().join(format!("oxblend-decode-structure-{}", std::process::id()));
+    std::fs::create_dir(&path).unwrap();
+    let work = Work(path);
+    let body = include_bytes!("fixtures/constraint-data/tar.blend");
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(body).unwrap();
+    for (family, bytes, event, command) in [
+        ("gzip", gzip.finish().unwrap(), "decode.scan", "blocks"),
+        ("seek", seekable(body), "decode.frame", "blocks"),
+    ] {
+        let input = work.0.join(format!("{family}.blend"));
+        std::fs::write(&input, bytes).unwrap();
+        let mut counts = Vec::new();
+        let mut outputs = Vec::new();
+        for level in [1, 2] {
+            let traces = work.0.join(format!("{family}-{level}"));
+            let mut cli = Command::new(env!("CARGO_BIN_EXE_oxblend"));
+            cli.arg(command)
+                .arg(&input)
+                .env("FLATTRACE_DIR", &traces)
+                .env_remove("FLATTRACE_TRACEPARENT")
+                .env_remove("FLATTRACE_LEVEL");
+            if command == "trace" {
+                cli.arg("--low-memory");
+            }
+            if level == 2 {
+                cli.env("FLATTRACE_LEVEL", "2");
+            }
+            let output = cli.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            outputs.push(output.stdout);
+            let files: Vec<_> = std::fs::read_dir(traces).unwrap().collect();
+            assert_eq!(files.len(), 1);
+            let rows: Vec<Value> = std::fs::read_to_string(files[0].as_ref().unwrap().path())
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let calls = rows
+                .iter()
+                .filter(|r| r["event"] == event && r["state"] == "start")
+                .count() as u64;
+            if level == 1 {
+                assert_eq!(calls, 0);
+                let hot: Vec<_> = rows
+                    .iter()
+                    .filter(|r| r["event"] == "hot.summary" && r["data"]["event"] == event)
+                    .collect();
+                assert!(
+                    !hot.is_empty(),
+                    "missing {event} aggregate for {family}: {rows:?}"
+                );
+                assert!(hot.iter().all(|r| r["data"]["bytes"].as_u64().unwrap() > 0));
+                if family == "seek" {
+                    assert!(
+                        hot.iter()
+                            .all(|r| r["data"]["input_bytes"].as_u64().unwrap() > 0)
+                    );
+                }
+                let keys: std::collections::HashSet<_> =
+                    hot.iter().map(|r| r["span"].as_str().unwrap()).collect();
+                assert_eq!(
+                    keys.len(),
+                    hot.len(),
+                    "more than one aggregate per phase/owner"
+                );
+                counts.push(
+                    hot.iter()
+                        .map(|r| r["data"]["count"].as_u64().unwrap())
+                        .sum::<u64>(),
+                );
+            } else {
+                counts.push(calls);
+            }
+        }
+        assert_eq!(outputs[0], outputs[1]);
+        assert!(counts[0] > 0);
+        assert_eq!(counts[0], counts[1], "{event} lost work in aggregate");
+    }
+}
+
 #[test]
 fn cli_and_api_modes_match_and_damaged_seek_metadata_reports_fallback() {
     let dir = std::env::temp_dir().join(format!("oxblend-low-memory-{}", std::process::id()));

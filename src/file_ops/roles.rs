@@ -1281,7 +1281,7 @@ fn expected_impl(f: &BlendFile, b: usize, p: &PointerLayout, write: bool) -> Res
     Ok(vec![result.to_vec()])
 }
 fn socket_storage_type(f: &BlendFile, socket: usize, write: bool) -> Result<Option<&'static [u8]>> {
-    let Some(owner) = f.owner_index()?.owner(socket) else {
+    let Some(owner) = f.owner_index()?.owner(f, socket) else {
         return Ok(None);
     };
     let socket_address = f.block(socket)?.old_address;
@@ -1541,7 +1541,7 @@ pub(crate) fn namespace(
         return Ok(Namespace::Data);
     }
     if (parent, field) == (b"LayerCollection", b"collection") {
-        if let Some(owner) = f.owner_index()?.owner(b)
+        if let Some(owner) = f.owner_index()?.owner(f, b)
             && f.dna_type_id(owner)? == b"Scene"
             && super::graph::uint(f, owner, &["master_collection"])? == address
         {
@@ -1708,16 +1708,11 @@ fn spline_ik_points_extent(f: &BlendFile, b: usize, p: &PointerLayout) -> Result
     }
     let index = f.owner_index()?;
     let owner = index
-        .owner(b)
+        .owner(f, b)
         .ok_or_else(|| fail("unprofiled_role", "Spline IK lacks ID owner"))?;
     let mut caller = false;
-    for (i, candidate) in f
-        .blocks()
-        .iter()
-        .enumerate()
-        .skip(owner + 1)
-        .take_while(|(i, _)| index.owner(*i) == Some(owner))
-    {
+    for i in index.owned_blocks(f, owner).skip(1) {
+        let candidate = &f.blocks()[i];
         if candidate.count != 1 || f.dna_type_id(i).ok() != Some(b"bConstraint".as_slice()) {
             continue;
         }
@@ -2057,6 +2052,16 @@ fn qualify_raw(
             let q = property(f, p)?;
             let len = count(f, b, &q, b"len")?;
             match number(f, b, &q, b"type")? {
+                0 if number(f, b, &q, b"subtype")? == 0 => {
+                    let capacity = count(f, b, &q, b"totallen")?;
+                    if len == 0 || len > capacity || capacity > block.size {
+                        return Err(fail(
+                            "pointer_extent",
+                            "string length/capacity exceeds allocation",
+                        ));
+                    }
+                    Some(block.size)
+                }
                 0 => Some(len),
                 5 => {
                     let width = match number(f, b, &q, b"subtype")? {
@@ -2145,7 +2150,21 @@ fn qualify_raw(
     {
         if parent == b"IDPropertyData" && field == b"pointer" {
             let q = property(f, p)?;
-            if number(f, b, &q, b"type")? == 0 && number(f, b, &q, b"subtype")? == 1 {
+            if number(f, b, &q, b"type")? == 0 {
+                if number(f, b, &q, b"subtype")? == 1 {
+                    return Ok(());
+                }
+                let len = count(f, b, &q, b"len")?;
+                if len == 0
+                    || len > bytes.len()
+                    || bytes[len - 1] != 0
+                    || bytes[..len - 1].contains(&0)
+                {
+                    return Err(fail(
+                        "pointer_extent",
+                        "string logical length/terminator mismatch",
+                    ));
+                }
                 return Ok(());
             }
         }

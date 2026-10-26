@@ -75,7 +75,9 @@ fn every_decimal_header_value_keeps_checked_asset_reads() {
                 );
                 continue;
             }
-            assert!(t.complete, "version {version}: {:?}", t.errors);
+            // #31 counts the two absent physical cache paths as incomplete.
+            assert!(!t.complete, "version {version}");
+            assert_eq!(t.json()["missing_path_count"], 2);
             assert!(t.errors.is_empty());
             assert_eq!(
                 t.usages

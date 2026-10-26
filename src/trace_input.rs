@@ -41,17 +41,44 @@ enum Storage {
         misses: RefCell<Windows>,
     },
 }
-#[derive(Debug)]
 pub(crate) struct Input {
     path: Option<PathBuf>,
     metadata: Metadata,
     storage: Storage,
+    diag: crate::session::DiagSink,
+    // Frozen at the admission boundary: spill and backing decode stage here.
+    temp_root: PathBuf,
 }
-fn fallback_warning(path: Option<&Path>, reason: &str) {
-    eprintln!(
-        "{}",
-        serde_json::json!({"warning":{"kind":"seek_table_fallback", "message":"untrusted seek table; using checked_full_streaming_spill", "reason":reason}, "path_hex":path.map(|p|crate::value::hex(p.as_os_str().as_encoded_bytes()))})
-    );
+impl std::fmt::Debug for Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Input")
+            .field("path", &self.path)
+            .field("metadata", &self.metadata)
+            .field("storage", &self.storage)
+            .field("temp_root", &self.temp_root)
+            .finish()
+    }
+}
+fn fallback_warning(diag: &crate::session::DiagSink, path: Option<&Path>, reason: &str) {
+    // The operation-owned sink carries the notice to the invocation drain
+    // and, for CLI calls, renders the historical envelope synchronously at
+    // emission. There is no silent-library fallback path by construction:
+    // every reader is admitted through an operation that owns a sink, so
+    // a missing-notice fallback cannot exist.
+    if crate::diagnostics::enabled() {
+        crate::diagnostics::point(
+            "warning",
+            serde_json::json!({"kind":"seek_table_fallback","message":reason,"source":"reader_admission"}),
+        );
+        crate::diagnostics::point(
+            "decision",
+            serde_json::json!({"item":path.map(|p|p.to_string_lossy()).unwrap_or_else(||"captured_input".into()),"kind":"seek_table_fallback","reason":reason}),
+        );
+    }
+    diag.emit(&crate::session::Diagnostic::SeekTableFallback {
+        path: path.map(|p| p.to_path_buf()),
+        reason: reason.to_string(),
+    });
 }
 fn io(e: std::io::Error) -> Error {
     Error::new(
@@ -81,7 +108,11 @@ fn containing(windows: &Windows, offset: usize) -> Option<(usize, &[u8])> {
     (offset - start < bytes.len()).then_some((start, bytes))
 }
 impl Input {
-    pub fn open_blocks(path: &Path) -> Result<Self> {
+    pub fn open_blocks(
+        path: &Path,
+        diag: &crate::session::DiagSink,
+        temp_root: &Path,
+    ) -> Result<Self> {
         let file = File::open(path).map_err(io)?;
         let metadata = file.metadata().map_err(io)?;
         let mut magic = [0; 4];
@@ -126,6 +157,10 @@ impl Input {
             path: Some(path.to_path_buf()),
             metadata,
             storage,
+            // Blocks streaming admission is deliberately silent: it never
+            // takes the seek-table fallback, so the stored sink never fires.
+            diag: diag.clone(),
+            temp_root: temp_root.to_path_buf(),
         };
         input.check()?;
         // Preserve full compressed admission (grammar, extent, trailer and
@@ -144,7 +179,7 @@ impl Input {
                         }
                     }
                     source.scan_uncached(|mut reader| {
-                        spill_checked_decode(&mut reader, &mut std::io::sink())
+                        spill_checked_decode(&mut reader, &mut std::io::sink(), temp_root)
                     })
                 })();
                 if proof.as_ref().is_err_and(|e| e.kind == "seek_table") {
@@ -157,14 +192,14 @@ impl Input {
                 }
             }
             Storage::BlocksStream { file, gzip, len } => {
-                decoded_length(file, *gzip).map(|length| *len = length)
+                decoded_length(file, *gzip, temp_root).map(|length| *len = length)
             }
             _ => Ok(()),
         };
         input.check()?;
         admission?;
         if let Some(file) = fallback {
-            let length = decoded_length(&file, false);
+            let length = decoded_length(&file, false, temp_root);
             input.check()?;
             let len = length?;
             input.storage = Storage::BlocksStream {
@@ -176,12 +211,18 @@ impl Input {
         }
         Ok(input)
     }
-    pub fn open_spill(path: &Path, reason: String) -> Result<Self> {
+    pub fn open_spill(
+        path: &Path,
+        reason: String,
+        diag: &crate::session::DiagSink,
+        temp_root: &Path,
+    ) -> Result<Self> {
         let source = File::open(path).map_err(io)?;
         let metadata = source.metadata().map_err(io)?;
-        fallback_warning(Some(path), &reason);
+        fallback_warning(diag, Some(path), &reason);
         let backing = Box::new(crate::input::Backing::open_file(
             source.try_clone().map_err(io)?,
+            temp_root,
         )?);
         let value = Self {
             path: Some(path.to_path_buf()),
@@ -191,6 +232,8 @@ impl Input {
                 backing,
                 fallback_reason: Some(reason),
             },
+            diag: diag.clone(),
+            temp_root: temp_root.to_path_buf(),
         };
         value.check()?;
         Ok(value)
@@ -201,23 +244,36 @@ impl Input {
     pub fn is_prefix(&self) -> bool {
         matches!(self.storage, Storage::Prefix { .. })
     }
-    pub fn open_native(path: &Path) -> Result<Self> {
+    pub fn open_native(
+        path: &Path,
+        diag: &crate::session::DiagSink,
+        temp_root: &Path,
+    ) -> Result<Self> {
         Self::from_file(
             File::open(path).map_err(io)?,
             Some(path.to_path_buf()),
             false,
             true,
+            diag,
+            temp_root,
         )
     }
-    pub fn open(path: &Path) -> Result<Self> {
-        Self::open_profile(path, false)
+    pub fn open(path: &Path, diag: &crate::session::DiagSink, temp_root: &Path) -> Result<Self> {
+        Self::open_profile(path, false, diag, temp_root)
     }
-    fn open_profile(path: &Path, kept_closure: bool) -> Result<Self> {
+    fn open_profile(
+        path: &Path,
+        kept_closure: bool,
+        diag: &crate::session::DiagSink,
+        temp_root: &Path,
+    ) -> Result<Self> {
         Self::from_file(
             File::open(path).map_err(io)?,
             Some(path.to_path_buf()),
             kept_closure,
             false,
+            diag,
+            temp_root,
         )
     }
     fn from_file(
@@ -225,6 +281,8 @@ impl Input {
         path: Option<PathBuf>,
         kept_closure: bool,
         native: bool,
+        diag: &crate::session::DiagSink,
+        temp_root: &Path,
     ) -> Result<Self> {
         let metadata = file.metadata().map_err(io)?;
         let mut magic = [0; 4];
@@ -289,10 +347,11 @@ impl Input {
             }
         } else if gzip || zstd {
             if let Some(reason) = &fallback_reason {
-                fallback_warning(path.as_deref(), reason);
+                fallback_warning(diag, path.as_deref(), reason);
             }
             let backing = Box::new(crate::input::Backing::open_file(
                 file.try_clone().map_err(io)?,
+                temp_root,
             )?);
             check()?;
             Storage::Spill {
@@ -313,6 +372,8 @@ impl Input {
             path,
             metadata,
             storage,
+            diag: diag.clone(),
+            temp_root: temp_root.to_path_buf(),
         };
         input.check()?;
         Ok(input)
@@ -431,9 +492,10 @@ impl Input {
                 } else {
                     match input.range_prefix(offset, len) {
                         Err(e) if e.kind == "seek_table" => {
-                            fallback_warning(self.path.as_deref(), &e.message);
+                            fallback_warning(&self.diag, self.path.as_deref(), &e.message);
                             let backing = Box::new(crate::input::Backing::open_file(
                                 input.file.try_clone().map_err(io)?,
+                                &self.temp_root,
                             )?);
                             self.check()?;
                             let _ = fallback.set(backing);
@@ -596,31 +658,68 @@ impl Input {
 // restarts the decoder and forward seeks discard bytes. No decoded tempfile,
 // retained windows, or compressed/decoded whole-file buffers are introduced.
 fn stream<T>(file: &File, gzip: bool, f: impl FnOnce(&mut dyn Read) -> Result<T>) -> Result<T> {
-    let failed = std::cell::Cell::new(false);
-    let mut source = file.try_clone().map_err(io)?;
-    source.seek(SeekFrom::Start(0)).map_err(io)?;
-    let source = BufReader::new(crate::input::Source {
-        file: source,
-        failed: &failed,
-    });
-    let result = if gzip {
-        f(&mut flate2::read::MultiGzDecoder::new(source))
-    } else {
-        let mut decoder = zstd::stream::read::Decoder::new(source).map_err(|e| {
-            Error::new(
-                if failed.get() { "io" } else { "compression" },
-                e.to_string(),
-            )
-        })?;
-        f(&mut decoder)
-    };
-    result.map_err(|e| {
-        if failed.get() {
-            Error::new("io", e.message)
+    let mut span = crate::diagnostics::Span::new_lazy("decode.scan", || {
+        if crate::diagnostics::enabled() {
+            serde_json::json!({"format":if gzip {"gzip"} else {"zstd"},"scope":"stream_scan","coverage":"bytes_requested_by_scan"})
         } else {
-            e
+            serde_json::Value::Null
         }
-    })
+    });
+    // Count decoded bytes actually delivered (including discarded forward
+    // seeks), not the declared whole-stream size. No wrapper when tracing off.
+    struct Measured<'a> {
+        reader: &'a mut dyn Read,
+        bytes: &'a std::cell::Cell<u64>,
+    }
+    impl Read for Measured<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.reader.read(buf)?;
+            self.bytes.set(self.bytes.get() + count as u64);
+            Ok(count)
+        }
+    }
+    let decoded = std::cell::Cell::new(0);
+    let call = |reader: &mut dyn Read| {
+        if crate::diagnostics::enabled() {
+            f(&mut Measured {
+                reader,
+                bytes: &decoded,
+            })
+        } else {
+            f(reader)
+        }
+    };
+    let result = (|| {
+        let failed = std::cell::Cell::new(false);
+        let mut source = file.try_clone().map_err(io)?;
+        source.seek(SeekFrom::Start(0)).map_err(io)?;
+        let source = BufReader::new(crate::input::Source {
+            file: source,
+            failed: &failed,
+        });
+        let result = if gzip {
+            call(&mut flate2::read::MultiGzDecoder::new(source))
+        } else {
+            let mut decoder = zstd::stream::read::Decoder::new(source).map_err(|e| {
+                Error::new(
+                    if failed.get() { "io" } else { "compression" },
+                    e.to_string(),
+                )
+            })?;
+            call(&mut decoder)
+        };
+        result.map_err(|e| {
+            if failed.get() {
+                Error::new("io", e.message)
+            } else {
+                e
+            }
+        })
+    })();
+    if crate::diagnostics::enabled() {
+        span.data(serde_json::json!({"bytes":decoded.get()}));
+    }
+    span.result(result)
 }
 /// Blocks admission keeps the spill-space precedence of the materializing
 /// reader: a decoded BHead extent that cannot fit the spill filesystem is
@@ -632,6 +731,7 @@ fn stream<T>(file: &File, gzip: bool, f: impl FnOnce(&mut dyn Read) -> Result<T>
 fn spill_checked_decode(
     reader: &mut impl std::io::Read,
     writer: &mut impl std::io::Write,
+    temp_root: &Path,
 ) -> Result<()> {
     let mut available: Option<u64> = None;
     let mut admitted = 0;
@@ -639,7 +739,7 @@ fn spill_checked_decode(
         let sampled = match available {
             Some(value) => value,
             None => {
-                let value = crate::input::temp_spill_available()?;
+                let value = crate::input::temp_spill_available(temp_root)?;
                 available = Some(value);
                 value
             }
@@ -647,10 +747,10 @@ fn spill_checked_decode(
         crate::input::admit_spill_extent(&mut admitted, required, sampled)
     })
 }
-fn decoded_length(file: &File, gzip: bool) -> Result<usize> {
+fn decoded_length(file: &File, gzip: bool, temp_root: &Path) -> Result<usize> {
     let mut count = Count(0);
     stream(file, gzip, |mut reader| {
-        spill_checked_decode(&mut reader, &mut count)
+        spill_checked_decode(&mut reader, &mut count, temp_root)
     })?;
     Ok(count.0)
 }

@@ -1,0 +1,251 @@
+{
+  "schema": "oxblend.flattrace-lane-additions/v1",
+  "lane": "L8",
+  "depends_on": "L5 32c4313e86d6aef0440240e9cc93909a6fca0e2b, direct descendant of integration/next f82aa4f; no cherry-picked L5 copies",
+  "root_owner": "L5 owns outputs, resource measurements and diagnostics_complete; L8 adds report member/control facts under report, never overwrites those root keys",
+  "scenarios": [
+    {
+      "command": "help",
+      "scenario": "error-known",
+      "ordered_parent_path": [
+        "run",
+        "help",
+        "error.help"
+      ],
+      "required_attributes": {
+        "error.help": [
+          "catalog_version"
+        ]
+      },
+      "required_events": [
+        "diagnostic.invocation",
+        "root.summary"
+      ],
+      "errors": []
+    },
+    {
+      "command": "help",
+      "scenario": "error-unknown",
+      "ordered_parent_path": [
+        "run",
+        "help",
+        "error.help"
+      ],
+      "required_attributes": {
+        "error.help": [
+          "catalog_version"
+        ]
+      },
+      "required_events": [
+        "diagnostic.invocation",
+        "error",
+        "diagnostic.receipt",
+        "root.summary"
+      ],
+      "errors": [
+        "usage"
+      ]
+    },
+    {
+      "command": "report",
+      "scenario": "preview-saved-or-selected-trace",
+      "ordered_parent_path": [
+        "run",
+        "report",
+        "report.snapshot"
+      ],
+      "required_attributes": {
+        "report.snapshot": [
+          "privacy_profile",
+          "network"
+        ]
+      },
+      "required_events": [
+        "diagnostic.invocation",
+        "root.summary"
+      ],
+      "root_summary_attributes": [
+        "outputs",
+        "resource",
+        "report.member_inventory"
+      ],
+      "forbidden_phases": [
+        "publish"
+      ],
+      "errors": []
+    },
+    {
+      "command": "report",
+      "scenario": "reviewed-create",
+      "ordered_parent_paths": [
+        [
+          "run",
+          "report",
+          "report.snapshot",
+          "write"
+        ],
+        [
+          "run",
+          "report",
+          "report.snapshot",
+          "publish"
+        ]
+      ],
+      "required_attributes": {
+        "report.snapshot": [
+          "privacy_profile",
+          "network"
+        ],
+        "publish": [
+          "output_written",
+          "durability_completed"
+        ]
+      },
+      "required_events": [
+        "diagnostic.invocation",
+        "root.summary"
+      ],
+      "root_summary_attributes": [
+        "outputs",
+        "resource",
+        "report.output_written"
+      ],
+      "errors": []
+    },
+    {
+      "command": "report",
+      "scenario": "changed-snapshot-refusal",
+      "ordered_parent_path": [
+        "run",
+        "report",
+        "report.snapshot"
+      ],
+      "required_events": [
+        "diagnostic.invocation",
+        "error",
+        "diagnostic.receipt",
+        "root.summary"
+      ],
+      "forbidden_phases": [
+        "publish"
+      ],
+      "errors": [
+        "input_changed"
+      ]
+    },
+    {
+      "command": "report",
+      "scenario": "existing-target-refusal",
+      "ordered_parent_path": [
+        "run",
+        "report",
+        "report.snapshot"
+      ],
+      "required_events": [
+        "diagnostic.invocation",
+        "error",
+        "diagnostic.receipt",
+        "root.summary"
+      ],
+      "forbidden_phases": [
+        "publish"
+      ],
+      "errors": [
+        "output_exists"
+      ]
+    },
+    {
+      "command": "report",
+      "scenario": "discard-preview",
+      "ordered_parent_path": [
+        "run",
+        "report",
+        "report.snapshot"
+      ],
+      "required_events": [
+        "diagnostic.invocation",
+        "root.summary"
+      ],
+      "forbidden_phases": [
+        "publish"
+      ],
+      "errors": []
+    }
+  ],
+  "diagnostic_points": {
+    "diagnostic.invocation": {
+      "parent": "active run root before command span",
+      "attributes": [
+        "run_id",
+        "command",
+        "trace_identity"
+      ]
+    },
+    "diagnostic.source": {
+      "parent": "active resolver/producer span",
+      "attributes": [
+        "id",
+        "kind",
+        "check_id",
+        "context_origin",
+        "caused_by",
+        "context"
+      ]
+    },
+    "diagnostic.receipt": {
+      "parent": "active run root after command/output result and before finish",
+      "attributes": [
+        "receipt",
+        "sha256"
+      ]
+    },
+    "diagnostic.propagation": {
+      "parent": "active forwarding span",
+      "attributes": [
+        "id",
+        "kind",
+        "check_id",
+        "propagations",
+        "context"
+      ],
+      "meaning": "same carried native failure identity; not a new failure"
+    }
+  },
+  "source_hooks": [
+    {
+      "site": "src/file_ops/index.rs::Index::lookup",
+      "checks": [
+        "pointer.namespace.lookup.missing",
+        "pointer.namespace.lookup.ambiguous",
+        "pointer.namespace.lookup.wrong_namespace",
+        "pointer.namespace.lookup.forwarded"
+      ],
+      "namespace": "actual selected Id/OwnerData/QualifiedCrossData"
+    },
+    {
+      "site": "src/value.rs::BlendFile::resolve_pointer_hop",
+      "checks": [
+        "pointer.resolve.forwarded"
+      ],
+      "namespace": "unknown forwarding boundary; typed field/header/offset context retained"
+    },
+    {
+      "site": "src/lib.rs::BlendFile::dereference",
+      "checks": [
+        "pointer.namespace.lookup.missing",
+        "pointer.namespace.lookup.ambiguous"
+      ],
+      "namespace": "GlobalDiagnostic"
+    },
+    {
+      "site": "src/trace.rs active forwarding ancestry check",
+      "checks": [
+        "linked_id.forwarding.cycle"
+      ],
+      "namespace": "Id; current file/block/element, pointer absent; exact private reference carried into TraceFailure"
+    }
+  ],
+  "causality": "Native-only private Error reference survives reclassification and TraceFailure serialization; collector reuses exact same-run, same-kind/declared-propagation IDs. Owner-declared terminal edges only. No nearest/last/message matching or database.",
+  "coverage_limit": "This publishes L8's additions; L5/L9 integrate and run the full semantic workload manifest, including per-member reconciliation. Source contexts remain explicitly partial where checks/candidate facts were not retained.",
+  "stdout": "L5's shared deliver/serialize owners use the same below-buffer KernelStdout counter/hash owner. Root diagnostics.stdout_delivery measures actual OS-accepted bytes."
+}

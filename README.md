@@ -1,4 +1,10 @@
-<p align="center"><img src="https://raw.githubusercontent.com/kyraneth/oxblend/main/assets/logo/oxblend-logo.svg" width="160" alt="Oxblend logo"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kyraneth/oxblend/main/assets/logo/oxblend-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/kyraneth/oxblend/main/assets/logo/oxblend-logo-light.svg">
+    <img src="https://raw.githubusercontent.com/kyraneth/oxblend/main/assets/logo/oxblend-logo.svg" width="160" alt="Oxblend logo">
+  </picture>
+</p>
 
 # Oxblend
 
@@ -6,7 +12,7 @@ Read, trace, pack and safely edit Blender `.blend` files without Blender.
 
 A fast Rust library and command-line tool. It tells you what a `.blend` file contains and what it depends on, packs it with its dependencies, and makes guarded edits, all without opening Blender. When it can't be sure, it refuses and says why instead of guessing.
 
-Linux x86_64 · version 1.3.3
+Linux x86_64 · release: **1.4.0**
 
 Offline diagnostics: `FLATTRACE_DIR=/path/to/traces oxblend summary scene.blend`.
 Unset/empty is off; no upload. See [local tracing](docs/USAGE.md#local-flattrace-diagnostics).
@@ -17,7 +23,12 @@ Unset/empty is off; no upload. See [local tracing](docs/USAGE.md#local-flattrace
 cargo install oxblend --locked
 ```
 
-Or download a binary from [Releases](https://github.com/kyraneth/oxblend/releases).
+This installs the latest **released crate**, not this development checkout.
+Or download a released binary from [Releases](https://github.com/kyraneth/oxblend/releases).
+Run `oxblend --version`, then `oxblend skill` for that executable's matching
+offline guide. Use documentation for the installed version: unreleased examples
+and flags are not promises about a released CLI. This checkout's relative docs
+links describe its development behavior, not the latest published release.
 
 ## Use
 
@@ -57,6 +68,28 @@ certify another shot. Then judge the whole pack's `planning_complete`,
 Exit 2 or any incomplete root is not farm-ready even when files were written.
 Reopen the isolated package in compatible Blender before delivery; serialized
 closure is not render or every-frame verification.
+
+## Cross-reference four shots before packing
+
+```sh
+printf '%s\n' project/seq-a/shot.blend project/seq-b/shot.blend \
+  project/seq-c/shot.blend project/seq-d/shot.blend > shots.txt
+oxblend trace --files-from shots.txt > dependencies.json 2> dependencies.stderr
+status=$?
+oxblend pack-sequence --files-from shots.txt -p project \
+  -t package-preview-new --dry-run > plan.json 2> plan.stderr
+status=$?
+```
+
+Inspect every `root_traces` entry and `cross_reference.roots`: shared/unique
+assets, missing files, missing linked IDs and typed hard root errors. `trace
+--summary` or multi-root `list` gives the complete human matrix; `list --json`
+retains per-root listings too. Both commands retain independently readable shots
+around a failed shot and exit 2 if any root is incomplete. One distinct root
+keeps its existing output. Dependency realpath grouping does not change lexical
+pack destinations; inventory bytes are not package bytes. Prefer explicit `-p`
+to the inferred common input parent. A parseable plan is not a complete package
+or Blender/render verification. See [multi-root details](docs/USAGE.md#multi-root-dependency-reports).
 
 ## Licence
 

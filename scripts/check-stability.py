@@ -109,6 +109,13 @@ def inventory(root):
         ('src/file_ops/index.rs', 'e . kind'),
         ('src/file_ops.rs', 's . state'),
         ('src/pack.rs', 'e . kind'),
+        # #31 copies a TraceFailure's existing serialized kind into the pack
+        # refusal causes. kind_str mirrors TraceFailure.json's enum mapping;
+        # Reader(k) stays k and LibraryReader remains library_read. No remap.
+        ('src/pack.rs', 'failure . kind_str ( )'),
+        # Typed-property context adds the source record/field without remapping
+        # the originating checked-reader error kind.
+        ('src/query/props.rs', 'e . kind'),
     }
     if set(dynamic) != expected_dynamic:
         raise ValueError('kind forwarding changed: '+repr(dynamic))
@@ -152,12 +159,18 @@ def check(root):
         raise ValueError('exit dispatch changed: '+repr(exits))
     # Every run error must reach the dispatch, including broken_pipe. Bind the
     # complete handler prefix, so any early-return bypass fails this inventory.
+    # The error object itself is owned by error_help::public_error (single
+    # kind/message/next/prose shape, no diagnostic_ref inside, no snapshots);
+    # the handler must still build a schema-1 base, finish the receipt and
+    # record delivery.
     start = next(i for i in range(len(main)) if main[i:i+4] == ["fn", "main", "(", ")"])
     joined = " ".join(main[start:])
     prefix = 'fn main ( ) { let args = std : : env : : args_os ( ) . collect : : < Vec < _ > > ( ) ;'
     if (not joined.startswith(prefix) or 'return' in main[start:]
             or 'let result = span . result ( run ( & args ) ) ;' not in joined
-            or 'if let Err ( error ) = result { let _ = writeln !' not in joined):
+            or 'if let Err ( error ) = result { let base = json !' not in joined
+            or 'failure_receipt : : finish ( & error , & base , exit_code )' not in joined
+            or 'let delivered = writeln !' not in joined):
         raise ValueError("error handler bypass/shape changed")
     rows = table(doc, 'exit-codes')
     declared = {r[0][0]: r[1] for r in rows}

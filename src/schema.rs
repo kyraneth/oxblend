@@ -19,6 +19,7 @@ pub struct Field {
 pub struct Struct {
     pub type_index: usize,
     pub fields: Vec<Field>,
+    #[cfg_attr(feature = "wasm-read-only", allow(dead_code))]
     pub(crate) by_name: HashMap<Vec<u8>, usize>,
 }
 #[derive(Debug)]
@@ -28,7 +29,13 @@ pub struct Schema {
     pub types: Vec<Vec<u8>>,
     pub lengths: Vec<usize>,
     pub structs: Vec<Struct>,
+    #[cfg_attr(feature = "wasm-read-only", allow(dead_code))]
     pub(crate) by_type: HashMap<usize, usize>,
+    #[cfg(feature = "native")]
+    pub(crate) pointer_programs:
+        Vec<std::sync::OnceLock<Result<std::sync::Arc<[crate::file_ops::PointerLayout]>>>>,
+    #[cfg(feature = "native")]
+    unhandled_paths: Vec<std::sync::OnceLock<bool>>,
 }
 fn name_info(full: &[u8]) -> Result<(Vec<u8>, bool, usize)> {
     let invalid = |message| Error::new("invalid_sdna", message);
@@ -76,6 +83,38 @@ fn name_info(full: &[u8]) -> Result<(Vec<u8>, bool, usize)> {
     Ok((name.to_vec(), pointer, array_len))
 }
 impl Schema {
+    #[cfg(feature = "native")]
+    pub(crate) fn unhandled_path(&self, si: usize) -> bool {
+        fn visit(s: &Schema, ti: usize, visiting: &mut HashSet<usize>) -> bool {
+            if !visiting.insert(ti) {
+                return true;
+            }
+            let result = s.by_type.get(&ti).is_some_and(|si| {
+                s.structs[*si].fields.iter().any(|field| {
+                    if field.pointer {
+                        return false;
+                    }
+                    let byte = matches!(
+                        s.types[field.type_index].as_slice(),
+                        b"char" | b"uchar" | b"int8_t" | b"uint8_t"
+                    );
+                    let path = [b"path".as_slice(), b"file", b"dir"].iter().any(|token| {
+                        field
+                            .name
+                            .windows(token.len())
+                            .any(|part| part.eq_ignore_ascii_case(token))
+                    });
+                    (byte && field.full_name.contains(&b'[') && path)
+                        || visit(s, field.type_index, visiting)
+                })
+            });
+            visiting.remove(&ti);
+            result
+        }
+        *self.unhandled_paths[si]
+            .get_or_init(|| visit(self, self.structs[si].type_index, &mut HashSet::new()))
+    }
+
     pub(crate) fn parse(data: &[u8], little: bool, pointer_size: usize) -> Result<Self> {
         let mut cursor = Cursor {
             data,
@@ -225,6 +264,14 @@ impl Schema {
             ));
         }
         Ok(Self {
+            #[cfg(feature = "native")]
+            pointer_programs: (0..structs.len())
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
+            #[cfg(feature = "native")]
+            unhandled_paths: (0..structs.len())
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
             names,
             types,
             lengths,
@@ -234,7 +281,7 @@ impl Schema {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 #[path = "../newtests/panel_declarators.rs"]
 mod panel_declarators;
 

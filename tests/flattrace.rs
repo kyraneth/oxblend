@@ -25,6 +25,44 @@ fn cli() -> Command {
         .env_remove("FLATTRACE_TRACEPARENT");
     c
 }
+fn declared_event(row: &Value, declarations: &Value) -> bool {
+    declarations["events"]
+        .get(row["event"].as_str().unwrap())
+        .is_some()
+}
+
+#[test]
+fn phase_contracts_are_registered_with_the_reference_checker() {
+    // Both files are authored contracts, not generated mirrors. Ordinary cargo
+    // test must catch a new semantic phase omitted from the reference checker.
+    let manifest: Value =
+        serde_json::from_str(include_str!("../docs/flattrace-manifest.json")).unwrap();
+    let declarations: Value =
+        serde_json::from_str(include_str!("../flattrace-events.json")).unwrap();
+    for event in manifest["phases"].as_object().unwrap().keys() {
+        assert_eq!(
+            declarations["events"][event]["kind"], "span",
+            "undeclared phase {event}"
+        );
+    }
+    for event in ["read.byte_array", "read.pointer_table"] {
+        for field in manifest["phases"][event]["start"]
+            .as_object()
+            .unwrap()
+            .keys()
+        {
+            assert!(
+                declarations["events"][event]["fields"].get(field).is_some(),
+                "undeclared {event} field {field}"
+            );
+        }
+    }
+    assert!(!declared_event(
+        &serde_json::json!({"event": "undeclared.test.phase"}),
+        &declarations
+    ));
+}
+
 #[test]
 fn opt_in_context_and_command_result_are_real() {
     let work = Work::new("parent");
@@ -56,8 +94,15 @@ fn opt_in_context_and_command_result_are_real() {
         .collect();
     assert_eq!(rows[0]["trace"], "11111111111111111111111111111111");
     assert_eq!(rows[0]["parent"], "2222222222222222");
+    let declarations: Value =
+        serde_json::from_str(include_str!("../flattrace-events.json")).unwrap();
     for (seq, row) in rows.iter().enumerate() {
         assert_eq!(row["seq"], seq);
+        assert!(
+            declared_event(row, &declarations),
+            "undeclared event in test trace: {}",
+            row["event"]
+        );
     }
     for event in [
         "run",

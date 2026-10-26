@@ -1,7 +1,7 @@
 //! Narrow native-null compatibility for absent ID references in copied libraries.
 //! No structural/list/DATA pointer, ambiguous target or present invalid ID is repaired.
 use crate::value::{PathStep, Value};
-use crate::{BlendFile, Result};
+use crate::{BlendFile, Error, Result};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PointerClear {
@@ -163,7 +163,7 @@ pub(crate) fn missing_id(
         }
         Ok(None) => return Ok(None),
     }
-    let Some(owner) = f.owner_index()?.owner(block) else {
+    let Some(owner) = f.owner_index()?.owner(f, block) else {
         return Ok(None);
     };
     crate::file_ops::qualify_read_id(f, owner)?;
@@ -235,25 +235,60 @@ pub(crate) fn missing_id(
 }
 /// Full copied-library scan includes unselected records: a pack must not retain
 /// these known garbage ID references merely because they were not selected.
-pub(crate) fn clears(f: &BlendFile) -> Result<Vec<PointerClear>> {
+pub(crate) fn clears(f: &BlendFile) -> (Vec<PointerClear>, Vec<serde_json::Value>) {
     let mut out = Vec::new();
+    let mut unknown = Vec::new();
+    let mut record = |block, path: &[PathStep], error: Error| {
+        let fields = path
+            .iter()
+            .map(|p| match p {
+                PathStep::Field(n) => n.clone(),
+                PathStep::Index(i) => format!("[{i}]").into_bytes(),
+            })
+            .collect::<Vec<_>>();
+        let mut site = crate::trace::failure_site(f, block, 0, &fields);
+        // The real PathStep list may contain indices. Preserve its exact raw
+        // pointer/type context even when the display path is flattened.
+        if let Ok(crate::value::Value::Pointer(p)) = f.get(block, 0, path, false) {
+            site["pointer_value_decimal"] = serde_json::json!(p.to_string());
+        }
+        if let Ok(loc) = f.locate_field(block, 0, path) {
+            site["expected_target_type_hex"] =
+                serde_json::json!(crate::value::hex(&f.schema().types[loc.field.type_index]));
+            site["expected_target_type"] = serde_json::json!(
+                std::str::from_utf8(&f.schema().types[loc.field.type_index]).ok()
+            );
+        }
+        unknown.push(serde_json::json!({"kind":error.kind,"status":"unknown","reason":error.message,"site":site}));
+    };
     for (i, b) in f.blocks().iter().enumerate() {
         if b.code != *b"DATA" {
             continue;
         }
-        for (path, _) in sites(f, i)? {
-            let loc = f.locate_field(i, 0, &path)?;
-            if let Some(clear) = missing_id(f, i, loc.offset)? {
-                out.push(clear)
-            } else {
-                // An unselected known slot is not permission to copy a bad
-                // pointer. If the narrow repair does not qualify, retain the
-                // original strict resolution refusal before any publication.
+        let paths = match sites(f, i) {
+            Ok(paths) => paths,
+            Err(error) => {
+                record(i, &[], error);
+                continue;
+            }
+        };
+        for (path, _) in paths {
+            let result = (|| {
+                let loc = f.locate_field(i, 0, &path)?;
+                if let Some(clear) = missing_id(f, i, loc.offset)? {
+                    return Ok(Some(clear));
+                }
                 if let Some(target) = f.get_pointer(i, 0, &path)? {
                     validate_present(f, i, loc.offset, target)?;
                 }
+                Ok(None)
+            })();
+            match result {
+                Ok(Some(clear)) => out.push(clear),
+                Ok(None) => (),
+                Err(error) => record(i, &path, error),
             }
         }
     }
-    Ok(out)
+    (out, unknown)
 }

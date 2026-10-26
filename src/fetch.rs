@@ -12,6 +12,12 @@ pub(crate) struct Raw {
     pub metadata: Metadata,
     pub bytes: Vec<u8>,
     pub proof: Option<crate::edit_container::capture::Proof>,
+    /// Opaque assets retain only an identity digest, never their physical body.
+    pub asset_hash: Option<u64>,
+    /// Blend captures retain the physical+decoded content digest computed by
+    /// the capture reads themselves; the decoded body is not retained here.
+    /// Fast captures leave this as None; bounded captures fill it.
+    pub digest: Option<crate::body_cache::SourceDigest>,
 }
 /// Whole-file snapshot buffer size; measured implementation choice, see
 /// `read_into`.
@@ -32,6 +38,7 @@ struct Queue {
 struct Shared {
     queue: Mutex<Queue>,
     wake: Condvar,
+    memory: crate::session::MemoryMode,
 }
 pub(crate) struct Fetcher {
     shared: Arc<Shared>,
@@ -91,7 +98,11 @@ fn occupied_fds(limit: libc::rlim_t) -> Result<(usize, &'static str)> {
     Ok((occupied, "fcntl"))
 }
 impl Fetcher {
+    /// Historical default: fast retention, no inline content hashing.
     pub fn new(roots: usize) -> Result<Self> {
+        Self::with_memory(roots, crate::session::MemoryMode::Fast)
+    }
+    pub fn with_memory(roots: usize, memory: crate::session::MemoryMode) -> Result<Self> {
         let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
         if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limit.as_mut_ptr()) } != 0 {
             return Err(io(std::io::Error::last_os_error()));
@@ -121,7 +132,12 @@ impl Fetcher {
             "fetch.budget",
             serde_json::json!({"limit":limit,"occupied":occupied,"publication_fds":publication_fds,"worker_fds":worker_fds,"lanes":lanes,"source":fd_source}),
         );
-        let shared = Arc::new(Shared::default());
+        // Mode propagates to workers through the shared owner: every lane
+        // reads the same retention policy without per-job plumbing.
+        let shared = Arc::new(Shared {
+            memory,
+            ..Shared::default()
+        });
         let threads = (0..lanes)
             .map(|_| {
                 let shared = shared.clone();
@@ -143,7 +159,14 @@ impl Fetcher {
                                 queue = shared.wake.wait(queue).unwrap();
                             }
                         };
-                        let mut span = crate::diagnostics::Span::at_level(2, "fetch", serde_json::json!({"path":job.path.to_string_lossy(),"blend":job.blend,"links":job.links}));
+                        // Essential pack work stays visible at L1: worker fetch
+                        // is the actual capture owner, not optional detail.
+                        let mut span = crate::diagnostics::Span::new("fetch",
+                            if crate::diagnostics::enabled() {
+                                serde_json::json!({"path":job.path.to_string_lossy(),"blend":job.blend,"links":job.links})
+                            } else {
+                                serde_json::Value::Null
+                            });
                         let result = fetch(&job.path, job.blend, &shared);
                         if result.is_err() && shared.queue.lock().unwrap().closed {
                             span.end("cancelled");
@@ -198,6 +221,8 @@ impl Drop for Fetcher {
         }
     }
 }
+/// Baseline fast snapshot read: plain bytes, cancellation polled by the
+/// caller. No content hashing on this path.
 fn read_into(
     file: &mut impl Read,
     bytes: &mut Vec<u8>,
@@ -218,7 +243,70 @@ fn read_into(
         bytes.extend_from_slice(&chunk[..n]);
     }
 }
+/// Bounded snapshot read: streams through the hashed decode output, so the
+/// decoded-content digest is recorded at the single decode itself.
+/// Cancellation is owned by the guarded reader/output wrappers; a stopped
+/// batch fails at the first cancelled read or write here.
+fn read_into_hashed(file: &mut impl Read, output: &mut impl Write) -> Result<()> {
+    let mut chunk = vec![0u8; READ_CHUNK];
+    loop {
+        let n = match file.read(&mut chunk) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            r => r.map_err(io)?,
+        };
+        if n == 0 {
+            return Ok(());
+        }
+        output.write_all(&chunk[..n]).map_err(io)?;
+    }
+}
 
+/// Stream opaque identity/copy through the existing measured read buffer.
+/// The same operation hashes exactly the bytes sent to the publication stage.
+pub(crate) fn opaque_copy(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    cancelled: impl Fn() -> bool,
+) -> Result<(u64, u64)> {
+    // Actual hash phase: identity digest over exactly the copied bytes.
+    let mut span = crate::diagnostics::Span::new(
+        "hash",
+        if crate::diagnostics::enabled() {
+            serde_json::json!({"algorithm":"xxh64_identity","role":"opaque_copy"})
+        } else {
+            serde_json::Value::Null
+        },
+    );
+    let result = (|| {
+        let mut hash = crate::edit_xxh::Xxh64::new();
+        let mut chunk = vec![0; READ_CHUNK];
+        let mut total = 0u64;
+        loop {
+            if cancelled() {
+                return Err(Error::new("io", "owning pack stopped private fetch"));
+            }
+            let n = match input.read(&mut chunk) {
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                result => result.map_err(io)?,
+            };
+            if n == 0 {
+                if span.active() {
+                    span.data(serde_json::json!({"bytes":total}));
+                }
+                return Ok((total, hash.digest()));
+            }
+            output.write_all(&chunk[..n]).map_err(io)?;
+            hash.update(&chunk[..n]);
+            total = total
+                .checked_add(n as u64)
+                .ok_or_else(|| Error::new("overflow", "opaque input length"))?;
+        }
+    })();
+    span.result(result)
+}
+
+/// Baseline fast physical-side capture read: cancellation and failure
+/// latching only, no hashing.
 struct CaptureRead<'a> {
     file: &'a mut File,
     shared: &'a Shared,
@@ -243,6 +331,8 @@ impl Read for CaptureRead<'_> {
         }
     }
 }
+/// Baseline fast decoded-side capture output: cancellation and failure
+/// latching only, no hashing.
 struct CaptureOutput<'a> {
     bytes: Vec<u8>,
     shared: &'a Shared,
@@ -261,6 +351,68 @@ impl Write for CaptureOutput<'_> {
         Ok(())
     }
 }
+/// Bounded physical-side capture read: cancellation, failure latching and
+/// the inline physical-content xxh64 (each live byte is hashed exactly
+/// once, at its single read; no second pass).
+struct HashedRead<'a, C: Fn() -> bool> {
+    file: &'a mut File,
+    cancelled: C,
+    failed: &'a Cell<bool>,
+    physical: &'a Cell<crate::edit_xxh::Xxh64>,
+}
+impl<C: Fn() -> bool> Read for HashedRead<'_, C> {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if (self.cancelled)() {
+                self.failed.set(true);
+                return Err(std::io::Error::other("owning pack stopped private fetch"));
+            }
+            match self.file.read(bytes) {
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                result => {
+                    if result.is_err() {
+                        self.failed.set(true);
+                    } else if let Ok(n) = result
+                        && n > 0
+                    {
+                        let mut hash = self.physical.get();
+                        hash.update(&bytes[..n]);
+                        self.physical.set(hash);
+                    }
+                    return result;
+                }
+            }
+        }
+    }
+}
+/// Bounded decoded-side capture output: cancellation, failure latching and
+/// the inline decoded-content xxh64 (each decoded byte is hashed exactly
+/// once as the decoder emits it).
+struct HashedOutput<'a, C: Fn() -> bool> {
+    bytes: Vec<u8>,
+    cancelled: C,
+    failed: &'a Cell<bool>,
+    decoded: &'a Cell<crate::edit_xxh::Xxh64>,
+}
+impl<C: Fn() -> bool> Write for HashedOutput<'_, C> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if (self.cancelled)() {
+            self.failed.set(true);
+            return Err(std::io::Error::other("owning pack stopped private fetch"));
+        }
+        let mut hash = self.decoded.get();
+        hash.update(bytes);
+        self.decoded.set(hash);
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+/// Baseline fast blend capture: exact historical decode with container
+/// proof, no content hashing. Raw is a plain read; only compressed families
+/// decode.
 fn blend_capture(
     file: &mut File,
     metadata: &Metadata,
@@ -311,6 +463,19 @@ fn blend_capture(
         failed: &failed,
     };
     let mut table = Ok(None);
+    // True decode phase: only compressed families decode; raw is a plain read.
+    let mut decode_span = if family != "raw" {
+        Some(crate::diagnostics::Span::new(
+            "decode",
+            if crate::diagnostics::enabled() {
+                serde_json::json!({"format":family,"compressed":true})
+            } else {
+                serde_json::Value::Null
+            },
+        ))
+    } else {
+        None
+    };
     let result = match family {
         "raw" => read_into(&mut input, &mut output.bytes, || {
             shared.queue.lock().unwrap().closed
@@ -332,58 +497,204 @@ fn blend_capture(
             result
         }
     };
-    result.map_err(|e| {
+    let decode_result = result.map_err(|e| {
         if failed.get() {
             Error::new("io", e.message)
         } else {
             e
         }
-    })?;
+    });
+    if let Some(mut span) = decode_span.take() {
+        if decode_result.is_ok() && span.active() {
+            span.data(serde_json::json!({"decoded_bytes":output.bytes.len()}));
+        }
+        span.result(decode_result.map(|_| ()))?;
+    } else {
+        decode_result?;
+    }
     let proof = crate::edit_container::capture::Proof::new(metadata, family, table);
     Ok((output.bytes, proof))
+}
+
+/// Shared checked blend capture: the fetch worker's decode and the
+/// verified-on-reuse re-materialization run the exact same reads, container
+/// proof construction and inline physical+decoded digest computation.
+pub(crate) fn capture_body(
+    file: &mut File,
+    metadata: &Metadata,
+    cancelled: impl Fn() -> bool + Copy,
+) -> Result<(
+    Vec<u8>,
+    crate::edit_container::capture::Proof,
+    crate::body_cache::SourceDigest,
+)> {
+    let failed = Cell::new(false);
+    let physical = Cell::new(crate::edit_xxh::Xxh64::new());
+    let decoded = Cell::new(crate::edit_xxh::Xxh64::new());
+    let mut input = BufReader::with_capacity(
+        READ_CHUNK,
+        HashedRead {
+            file,
+            cancelled,
+            failed: &failed,
+            physical: &physical,
+        },
+    );
+    // Four magic bytes are a format field, not a read-size assumption. Accumulate
+    // short reads and replay only this field from the existing buffer; no reread.
+    let mut prefix = Vec::new();
+    while prefix.len() < 4 {
+        let available = input.fill_buf().map_err(io)?;
+        if available.is_empty() {
+            break;
+        }
+        let n = (4 - prefix.len()).min(available.len());
+        prefix.extend_from_slice(&available[..n]);
+        input.consume(n);
+    }
+    let family = if prefix.starts_with(&[0x1f, 0x8b]) {
+        "gzip"
+    } else if prefix
+        .get(..4)
+        .is_some_and(|b| le_magic(b) == 0xfd2fb528 || le_magic(b) & 0xfffffff0 == 0x184d2a50)
+    {
+        "zstd"
+    } else {
+        "raw"
+    };
+    let mut input = std::io::Cursor::new(prefix).chain(input);
+    let mut output = HashedOutput {
+        bytes: if family == "raw" {
+            Vec::with_capacity(
+                usize::try_from(metadata.len())
+                    .map_err(|_| Error::new("overflow", "physical input length"))?,
+            )
+        } else {
+            Vec::new()
+        },
+        cancelled,
+        failed: &failed,
+        decoded: &decoded,
+    };
+    let mut table = Ok(None);
+    // True decode phase: only compressed families decode; raw is a plain read.
+    let mut decode_span = if family != "raw" {
+        Some(crate::diagnostics::Span::new(
+            "decode",
+            if crate::diagnostics::enabled() {
+                serde_json::json!({"format":family,"compressed":true})
+            } else {
+                serde_json::Value::Null
+            },
+        ))
+    } else {
+        None
+    };
+    let result = match family {
+        // Raw streams through the same hashed output wrapper, so every
+        // family records its decoded-content digest at the decode itself.
+        "raw" => read_into_hashed(&mut input, &mut output),
+        "gzip" => {
+            crate::stream_decode::decode(&mut flate2::read::MultiGzDecoder::new(input), &mut output)
+        }
+        _ => {
+            let operation = crate::edit_container::capture::Recording::new(
+                usize::try_from(metadata.len())
+                    .map_err(|_| Error::new("overflow", "physical input length"))?,
+            )
+            .map_err(|e| Error::new("compression", e.to_string()))?;
+            let mut decoder = zstd::stream::zio::Reader::new(input, operation);
+            let result = crate::stream_decode::decode(&mut decoder, &mut output);
+            if result.is_ok() {
+                table = decoder.operation_mut().take_proof(output.bytes.len());
+            }
+            result
+        }
+    };
+    let decode_result = result.map_err(|e| {
+        if failed.get() {
+            Error::new("io", e.message)
+        } else {
+            e
+        }
+    });
+    if let Some(mut span) = decode_span.take() {
+        if decode_result.is_ok() && span.active() {
+            span.data(serde_json::json!({"decoded_bytes":output.bytes.len()}));
+        }
+        span.result(decode_result.map(|_| ()))?;
+    } else {
+        decode_result?;
+    }
+    let proof = crate::edit_container::capture::Proof::new(metadata, family, table);
+    let digest = crate::body_cache::SourceDigest {
+        physical: physical.get().digest(),
+        decoded: decoded.get().digest(),
+    };
+    Ok((output.bytes, proof, digest))
 }
 fn le_magic(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().expect("four-byte physical magic"))
 }
-fn fetch(path: &Path, blend: bool, shared: &Shared) -> Result<Raw> {
-    let mut span = crate::diagnostics::Span::new(
-        "file.open",
-        serde_json::json!({"path":path.to_string_lossy()}),
-    );
-    let result = (|| {
-    if !path.metadata().map_err(io)?.is_file() {
-        return Err(Error::new("pack_path", "pack source is not regular file"));
-    }
-    let mut file = File::open(path).map_err(io)?;
-    let metadata = file.metadata().map_err(io)?;
+/// Snapshot capture preserves its historical nonregular-source refusal,
+/// including directory library paths during fast and bounded packs.
+/// Read-root admission has a separate shared owner in read_reports: changing
+/// this capture boundary would change existing CLI pack diagnostics.
+/// Stat-before-open remains essential for FIFO/socket/device sources.
+fn admit_capture_source(metadata: &Metadata) -> Result<()> {
     if !metadata.is_file() {
         return Err(Error::new("pack_path", "pack source is not regular file"));
     }
-    let captured = if blend {
-        blend_capture(&mut file, &metadata, shared).map(|(bytes, proof)| (bytes, Some(proof)))
-    } else {
-        let capacity = usize::try_from(metadata.len())
-            .map_err(|_| Error::new("overflow", "physical input length"))?;
-        let mut bytes = Vec::with_capacity(capacity);
-        read_into(&mut file, &mut bytes, || {
-            shared.queue.lock().unwrap().closed
-        })?;
-        Ok((bytes, None))
-    };
-    if (blend
-        && (capture_signature(&file.metadata().map_err(io)?) != capture_signature(&metadata)
-            || capture_signature(&path.metadata().map_err(io)?) != capture_signature(&metadata)))
-        || (!blend
-            && (signature(&file.metadata().map_err(io)?) != signature(&metadata)
-                || signature(&path.metadata().map_err(io)?) != signature(&metadata)))
+    Ok(())
+}
+fn check_capture_signature(path: &Path, file: &File, admitted: &Metadata) -> Result<()> {
+    if capture_signature(&file.metadata().map_err(io)?) != capture_signature(admitted)
+        || capture_signature(&path.metadata().map_err(io)?) != capture_signature(admitted)
     {
         return Err(Error::new(
             "input_changed",
             "source signature changed during snapshot",
         ));
     }
-    let (bytes, proof) = captured?;
-    if proof.as_ref().is_none_or(|p| p.family == "raw") && bytes.len() as u64 != metadata.len() {
+    Ok(())
+}
+
+fn fetch(path: &Path, blend: bool, shared: &Shared) -> Result<Raw> {
+    let mut span = crate::diagnostics::Span::new(
+        "file.open",
+        if crate::diagnostics::enabled() {
+            serde_json::json!({"path":path.to_string_lossy(),"input":crate::diagnostics::observe_input(path)})
+        } else {
+            serde_json::Value::Null
+        },
+    );
+    let result = (|| {
+    admit_capture_source(&path.metadata().map_err(io)?)?;
+    let mut file = File::open(path).map_err(io)?;
+    let metadata = file.metadata().map_err(io)?;
+    admit_capture_source(&metadata)?;
+    let captured = if blend {
+        match shared.memory {
+            crate::session::MemoryMode::Fast => blend_capture(&mut file, &metadata, shared)
+                .map(|(bytes, proof)| (bytes, Some(proof), None, None)),
+            crate::session::MemoryMode::Bounded => {
+                let closed = || shared.queue.lock().unwrap().closed;
+                capture_body(&mut file, &metadata, closed)
+                    .map(|(bytes, proof, digest)| (bytes, Some(proof), None, Some(digest)))
+            }
+        }
+    } else {
+        let (length, hash) = opaque_copy(&mut file, &mut std::io::sink(), || {
+            shared.queue.lock().unwrap().closed
+        })?;
+        if length != metadata.len() {
+            return Err(Error::new("input_changed", "source signature changed during snapshot"));
+        }
+        Ok((Vec::new(), None, Some(hash), None))
+    };
+    check_capture_signature(path, &file, &metadata)?;
+    let (bytes, proof, asset_hash, digest) = captured?;
+    if blend && proof.as_ref().is_none_or(|p| p.family == "raw") && bytes.len() as u64 != metadata.len() {
         return Err(Error::new(
             "input_changed",
             "source signature changed during snapshot",
@@ -391,8 +702,14 @@ fn fetch(path: &Path, blend: bool, shared: &Shared) -> Result<Raw> {
     }
     span.data(serde_json::json!({"size_bytes":metadata.len(),"decoded_bytes":bytes.len(),"blend":blend}));
     drop(file);
-    Ok(Raw { metadata, bytes, proof })
-    })().map_err(|e| crate::edit_output::context(e, "fetch/read snapshot", path));
+    Ok(Raw {
+        metadata,
+        bytes,
+        proof,
+        asset_hash,
+        digest,
+    })
+    })().map_err(|e| crate::edit_output::session_context(e, "fetch/read snapshot", path));
     span.result(result)
 }
 
@@ -400,7 +717,7 @@ fn fetch(path: &Path, blend: bool, shared: &Shared) -> Result<Raw> {
 mod tests {
     use super::*;
     use std::io::ErrorKind;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Owned(PathBuf);
     impl Owned {
@@ -420,6 +737,37 @@ mod tests {
         }
     }
     static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    /// Pack capture must retain its pre-R38 refusal, independent of scalar
+    /// read-root admission. Both blend and opaque lanes refuse before open.
+    #[test]
+    fn directory_capture_preserves_pack_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "oxblend-member8-fetch-dir-{}-{}",
+            std::process::id(),
+            crate::fetch::tests::NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        struct Guard(PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir(&self.0);
+            }
+        }
+        let _guard = Guard(dir.clone());
+        let shared = Shared::default();
+        for blend in [true, false] {
+            let error = fetch(&dir, blend, &shared).unwrap_err();
+            assert_eq!(error.kind, "pack_path");
+            assert_eq!(
+                error.message,
+                format!(
+                    "fetch/read snapshot '{}': pack source is not regular file",
+                    dir.display()
+                )
+            );
+        }
+    }
 
     /// A reader that fails once with Interrupted before producing the payload
     /// in short reads smaller than any buffer (input-capture.md: interrupted
@@ -487,6 +835,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fast_blend_capture_carries_no_digest() {
+        let file = Owned::new(b"payload");
+        let shared = Shared::default();
+        assert_eq!(shared.memory, crate::session::MemoryMode::Fast);
+        let raw = fetch(&file.0, true, &shared).unwrap();
+        assert_eq!(raw.bytes, b"payload");
+        assert!(raw.proof.is_some());
+        assert!(raw.digest.is_none());
+    }
+
+    #[test]
+    fn bounded_blend_capture_hashes_inline() {
+        let file = Owned::new(b"payload");
+        let shared = Shared {
+            memory: crate::session::MemoryMode::Bounded,
+            ..Shared::default()
+        };
+        let raw = fetch(&file.0, true, &shared).unwrap();
+        assert_eq!(raw.bytes, b"payload");
+        assert!(raw.proof.is_some());
+        let digest = raw.digest.expect("bounded blend carries a content digest");
+        let mut physical = crate::edit_xxh::Xxh64::new();
+        physical.update(b"payload");
+        let mut decoded = crate::edit_xxh::Xxh64::new();
+        decoded.update(b"payload");
+        assert_eq!(digest.physical, physical.digest());
+        assert_eq!(digest.decoded, decoded.digest());
+    }
+
     /// input-capture.md: cancellation during capture stops without a
     /// fabricated snapshot. The queue is observed before every chunk.
     #[test]
@@ -505,54 +883,23 @@ mod tests {
         );
     }
 
-    /// input-capture.md: a source that changes during capture fails
-    /// explicitly. A concurrent writer appends to a file large enough that
-    /// the read is still in progress; the signature guard then refuses.
+    /// A mutation after capture admission must fail the actual completion
+    /// guard. Synchronize by performing the append between the two boundaries,
+    /// not by hoping a writer thread runs during a large read under host load.
     #[test]
-    fn source_change_during_capture_fails_explicitly() {
-        let path = std::env::temp_dir().join(format!(
-            "oxblend-member8-fetch-change-{}",
-            std::process::id()
-        ));
-        {
-            let block = vec![0u8; 1 << 20];
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&path)
-                .unwrap();
-            for _ in 0..512 {
-                std::io::Write::write_all(&mut file, &block).unwrap();
-            }
-        }
-        struct Guard(PathBuf);
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_file(&self.0);
-            }
-        }
-        let _guard = Guard(path.clone());
-        let stop = std::sync::Arc::new(AtomicBool::new(false));
-        let writer = {
-            let path = path.clone();
-            let stop = stop.clone();
-            thread::spawn(move || {
-                let mut appender = std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&path)
-                    .unwrap();
-                while !stop.load(Ordering::Relaxed) {
-                    std::io::Write::write_all(&mut appender, b"x").unwrap();
-                }
-            })
-        };
-        let shared = Shared::default();
-        let result = fetch(&path, false, &shared);
-        stop.store(true, Ordering::Relaxed);
-        writer.join().unwrap();
-        let error = result.unwrap_err();
+    fn source_change_after_capture_admission_fails_explicitly() {
+        let source = Owned::new(b"captured source");
+        let file = File::open(&source.0).unwrap();
+        let admitted = file.metadata().unwrap();
+        check_capture_signature(&source.0, &file, &admitted).unwrap();
+        let mut appender = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&source.0)
+            .unwrap();
+        std::io::Write::write_all(&mut appender, b"changed").unwrap();
+        let error = check_capture_signature(&source.0, &file, &admitted).unwrap_err();
         assert_eq!(error.kind, "input_changed");
+        assert_eq!(error.message, "source signature changed during snapshot");
     }
 
     /// The public queue contract: a submitted job is answered by a worker,
@@ -563,6 +910,7 @@ mod tests {
         let file = Owned::new(b"payload");
         let result = fetcher.submit(&file.0, true).recv().unwrap().unwrap();
         assert_eq!(result.bytes, b"payload");
+        assert!(result.digest.is_none());
         drop(fetcher);
         let fetcher = Fetcher::new(1).unwrap();
         let file = Owned::new(b"late");
@@ -571,9 +919,23 @@ mod tests {
         // The job may complete before the close lands; either a result or a
         // channel close is acceptable, never a fabricated snapshot.
         match pending.recv() {
-            Ok(Ok(raw)) => assert_eq!(raw.bytes, b"late"),
+            Ok(Ok(raw)) => {
+                assert!(raw.bytes.is_empty());
+                let mut expected = crate::edit_xxh::Xxh64::new();
+                expected.update(b"late");
+                assert_eq!(raw.asset_hash, Some(expected.digest()));
+            }
             Ok(Err(error)) => assert_eq!(error.kind, "io"),
             Err(_) => {}
         }
+    }
+
+    #[test]
+    fn with_memory_bounded_worker_carries_digest() {
+        let fetcher = Fetcher::with_memory(1, crate::session::MemoryMode::Bounded).unwrap();
+        let file = Owned::new(b"payload");
+        let raw = fetcher.submit(&file.0, true).recv().unwrap().unwrap();
+        assert_eq!(raw.bytes, b"payload");
+        assert!(raw.digest.is_some());
     }
 }

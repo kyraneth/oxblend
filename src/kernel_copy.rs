@@ -58,7 +58,7 @@ fn transfer(
     source: &File,
     target: &mut File,
     length: u64,
-    raw: Option<&[u8]>,
+    raw: Option<&crate::input::Backing>,
     mut call: impl FnMut(&File, &mut libc::loff_t, &File, usize) -> std::io::Result<usize>,
 ) -> Result<Outcome> {
     let mut offset = 0;
@@ -101,9 +101,20 @@ fn transfer(
     };
     // No kernel byte reached the fresh stage. Use a genuinely user-space stream
     // (dyn Read prevents std::io::copy's implicit second kernel-copy attempt).
-    let copied = if let Some(bytes) = raw {
+    let copied = if let Some(backing) = raw {
         // Immutable raw capture is already physical data, source-signature bound.
-        std::io::copy(&mut std::io::Cursor::new(bytes), target).map_err(io)?
+        // Stream the bounded backing lazily, only if kernel transport is
+        // unavailable: a private byte body reads its own extent, and a
+        // verified working body serves its exclusively-guarded checked bytes
+        // (a digest failure refuses here with its typed latched error).
+        // Neither path rereads the live source file.
+        match backing {
+            // Preserve the fast path's concrete Cursor copy specialization.
+            crate::input::Backing::Bytes(bytes) => {
+                std::io::copy(&mut std::io::Cursor::new(bytes.as_slice()), target).map_err(io)?
+            }
+            _ => backing.scan(|reader| std::io::copy(reader, target).map_err(io))?,
+        }
     } else {
         let mut input = source.try_clone().map_err(io)?;
         input.seek(SeekFrom::Start(0)).map_err(io)?;
@@ -129,7 +140,7 @@ pub(crate) fn full(
     path: &Path,
     metadata: &Metadata,
     target: &mut File,
-    raw: Option<&[u8]>,
+    raw: Option<&crate::input::Backing>,
 ) -> Result<u64> {
     guarded(source, path, metadata, target, raw, native)
 }
@@ -138,18 +149,34 @@ pub(crate) fn guarded(
     path: &Path,
     metadata: &Metadata,
     target: &mut File,
-    raw: Option<&[u8]>,
+    raw: Option<&crate::input::Backing>,
     call: impl FnMut(&File, &mut libc::loff_t, &File, usize) -> std::io::Result<usize>,
 ) -> Result<u64> {
-    check_source(source, path, metadata)?;
-    let copied = transfer(source, target, metadata.len(), raw, call);
-    if let Ok(outcome) = &copied {
-        outcome.report(path);
-    }
-    // Changed-source dominates a partial transport result, as the existing guard
-    // does. Never publish an output whose source changed during any mechanism.
-    check_source(source, path, metadata)?;
-    copied.map(|outcome| outcome.bytes)
+    // Actual physical copy phase at the kernel-transport owner.
+    // Captured-byte copies also flow through transfer(raw=Some).
+    let mut span = crate::diagnostics::Span::new(
+        "copy",
+        if crate::diagnostics::enabled() {
+            serde_json::json!({"path":path.to_string_lossy(),"requested_bytes":metadata.len(),"captured":raw.is_some()})
+        } else {
+            serde_json::Value::Null
+        },
+    );
+    let result = (|| {
+        check_source(source, path, metadata)?;
+        let copied = transfer(source, target, metadata.len(), raw, call);
+        if let Ok(outcome) = &copied {
+            outcome.report(path);
+            if span.active() {
+                span.data(serde_json::json!({"bytes":outcome.bytes,"mechanism":outcome.mechanism,"fallback_errno":outcome.fallback_errno,"fallback_reason":outcome.fallback_reason}));
+            }
+        }
+        // Changed-source dominates a partial transport result, as the existing guard
+        // does. Never publish an output whose source changed during any mechanism.
+        check_source(source, path, metadata)?;
+        copied.map(|outcome| outcome.bytes)
+    })();
+    span.result(result)
 }
 pub(crate) fn check_source(source: &File, path: &Path, metadata: &Metadata) -> Result<()> {
     let expected = crate::fetch::capture_signature(metadata);
@@ -333,6 +360,7 @@ mod tests {
         let (_, mut target, body) = files(&work);
         // A write-only source cannot satisfy a userspace reread. Metadata and
         // immutable capture are valid; forced EXDEV must still preserve bytes.
+        let raw = crate::input::Backing::Bytes(body.clone());
         let source = std::fs::OpenOptions::new()
             .write(true)
             .open(work.0.join("source"))
@@ -341,7 +369,7 @@ mod tests {
             &source,
             &mut target,
             body.len() as u64,
-            Some(&body),
+            Some(&raw),
             |_, _, _, _| Err(std::io::Error::from_raw_os_error(libc::EXDEV)),
         )
         .unwrap();
@@ -352,11 +380,12 @@ mod tests {
     fn fallback_short_capture_refuses_length_mismatch() {
         let work = Work::new();
         let (source, mut target, body) = files(&work);
+        let raw = crate::input::Backing::Bytes(body[..1].to_vec());
         let error = transfer(
             &source,
             &mut target,
             body.len() as u64,
-            Some(&body[..1]),
+            Some(&raw),
             |_, _, _, _| Err(std::io::Error::from_raw_os_error(libc::EXDEV)),
         )
         .unwrap_err();

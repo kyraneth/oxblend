@@ -28,7 +28,7 @@ fn cli_honours_upstream_detail_levels_without_changing_product_output() {
         (Some(OsStr::new("18446744073709551616")), 1, true),
         (Some(OsStr::from_bytes(b"\xff")), 1, true),
     ];
-    let mut default_events = None;
+    let mut events_by_detail = std::collections::HashMap::new();
     for (i, (raw, level, note)) in cases.into_iter().enumerate() {
         let directory = work.join(i.to_string());
         let mut command = Command::new(env!("CARGO_BIN_EXE_oxblend"));
@@ -75,10 +75,17 @@ fn cli_honours_upstream_detail_levels_without_changing_product_output() {
             .iter()
             .map(|r| (r["event"].clone(), r["state"].clone()))
             .collect();
-        if let Some(default) = &default_events {
+        if level == 1 {
+            assert!(rows.iter().any(|r| r["event"] == "hot.summary"));
+            assert!(!rows.iter().any(|r| r["event"] == "query.resolve"));
+        } else {
+            assert!(!rows.iter().any(|r| r["event"] == "hot.summary"));
+            assert!(rows.iter().any(|r| r["event"] == "query.resolve"));
+        }
+        if let Some(default) = events_by_detail.get(&(level >= 2)) {
             assert_eq!(&events, default);
         } else {
-            default_events = Some(events);
+            events_by_detail.insert(level >= 2, events);
         }
     }
     std::fs::remove_dir_all(work).unwrap();

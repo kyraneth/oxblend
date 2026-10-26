@@ -1,5 +1,7 @@
 //! Synthetic wire-level linked-library null compatibility, through the real CLI.
 //! No Blender installation or production files are used. See the fixture generator.
+#[path = "support/diagnostic_metadata.rs"]
+mod diagnostic_metadata;
 use oxblend::{BlendFile, value::PathStep};
 use serde_json::Value;
 use std::{
@@ -96,13 +98,15 @@ fn json(output: &Output, exit: i32) -> Value {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+    let mut value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
         panic!(
             "{e}; stdout={} stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         )
-    })
+    });
+    diagnostic_metadata::normalize(&mut value);
+    value
 }
 fn warnings(report: &Value) -> &Vec<Value> {
     report["warnings"].as_array().unwrap()
@@ -167,13 +171,32 @@ fn linked_roles_warn_without_incompleteness_in_strict_nonstrict_and_list() {
         let stderr = std::str::from_utf8(&result.stderr).unwrap();
         let notices: Vec<Value> = stderr
             .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
+            .map(|line| {
+                let mut value = serde_json::from_str(line).unwrap();
+                diagnostic_metadata::normalize(&mut value);
+                value
+            })
             .collect();
-        assert_eq!(notices.len(), 3, "{stderr}");
-        assert!(
-            notices
-                .iter()
-                .all(|n| n["warning"]["kind"] == "library_null_pointer")
+        // #31 reports-always-tell-everything: ordinary list no longer hides
+        // existing warnings of other kinds. Baseline 97be77a trace/full-info
+        // already included this fixture's Camera (CA) unknown-asset warning.
+        let emitted: Vec<_> = notices.iter().map(|n| n["warning"].clone()).collect();
+        let compatibility: Vec<_> = emitted
+            .iter()
+            .filter(|w| w["kind"] == "library_null_pointer")
+            .collect();
+        let expected: Vec<_> = warnings(&strict)
+            .iter()
+            .filter(|w| w["kind"] == "library_null_pointer")
+            .collect();
+        assert_eq!(
+            compatibility, expected,
+            "all three qualified compatibility records must remain exact"
+        );
+        assert_eq!(
+            &emitted,
+            warnings(&strict),
+            "verbosity must not hide an existing diagnostic"
         );
         if flags.is_empty() {
             let text = std::str::from_utf8(&result.stdout).unwrap();

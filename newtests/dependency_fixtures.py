@@ -47,8 +47,10 @@ def iddata(name):
 ID = ('ID', 72, [('char', 'name[64]'), ('void', '*lib')])
 LIST = ('ListBase', 16, [('void', '*first'), ('void', '*last')])
 for field in ['name', 'filepath']:
-    structures = [ID, ('Text', 80, [('ID', 'id'), ('char', '*' + field)])]
-    records = [(b'TX', 100, 1, iddata(b'TXexternal') + struct.pack('<Q', 200)),
+    # Native Text.flags exists since at least Blender2.25. These cases model
+    # external Texts explicitly; absent flags is a separate UNKNOWN fixture.
+    structures = [ID, ('Text', 84, [('ID', 'id'), ('char', '*' + field), ('int', 'flags')])]
+    records = [(b'TX', 100, 1, iddata(b'TXexternal') + struct.pack('<Qi', 200, 0)),
                (b'DATA', 200, 0, b'//external.py\0')]
     (OUT / ('text-' + field + '.blend')).write_bytes(saved(structures, records, 405))
 
@@ -101,11 +103,11 @@ structures = [ID, LIST,
 
 structures = [ID, ('Material', 80, [('ID', 'id'), ('Image', '*image')]),
               ('Image', 1100, [('ID', 'id'), ('char', 'name[1024]'), ('int', 'source')]),
-              ('Text', 80, [('ID', 'id'), ('char', '*name')])]
+              ('Text', 84, [('ID', 'id'), ('char', '*name'), ('int', 'flags')])]
 (OUT / 'pack-unselected-library.blend').write_bytes(saved(structures,
     [(b'MA', 100, 1, iddata(b'MAselected') + struct.pack('<Q', 200)),
      (b'IM', 200, 2, iddata(b'IMselected') + fixed(b'//texture.png', 1024) + struct.pack('<i', 1)),
-     (b'TX', 300, 3, iddata(b'TXunused') + struct.pack('<Q', 400)),
+     (b'TX', 300, 3, iddata(b'TXunused') + struct.pack('<Qi', 400, 0)),
      (b'DATA', 400, 0, b'/unselected/source.py\0')], 405))
 (OUT / 'pack-unselected-root.blend').write_bytes(saved(root_structures,
     [(b'ID', 100, 0, fixed(b'MAselected', 64) + struct.pack('<Q', 200)),

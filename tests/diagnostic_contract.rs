@@ -39,7 +39,9 @@ fn empty_image_path_is_absent_but_populated_image_is_traced() {
     ));
     std::fs::write(&path, body).unwrap();
     let report = trace(&path, options()).unwrap();
-    assert!(report.complete, "{:?}", report.errors);
+    assert!(!report.complete);
+    assert!(report.errors.is_empty());
+    assert_eq!(report.json()["problem_counts"]["missing_asset"], 1);
     assert!(
         report
             .usages
@@ -77,7 +79,7 @@ fn summary_missing_fields_are_typed_warnings_and_id_families_are_named() {
 }
 
 #[test]
-fn missing_references_print_incomplete_list_but_do_not_redefine_trace_completeness() {
+fn missing_references_print_incomplete_list_and_trace() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
     let work = std::env::temp_dir().join(format!("oxblend-missing-list-{}", std::process::id()));
     std::fs::create_dir(&work).unwrap();
@@ -124,12 +126,10 @@ fn missing_references_print_incomplete_list_but_do_not_redefine_trace_completene
             .arg(&file)
             .output()
             .unwrap();
-        assert_eq!(
-            out.status.code(),
-            Some(if kind == "missing_asset" { 0 } else { 2 })
-        );
+        assert_eq!(out.status.code(), Some(2));
         let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(j["complete"], kind == "missing_asset");
+        assert_eq!(j["complete"], false);
+        assert_eq!(j["problem_counts"][kind], 1);
         assert_eq!(j["missing_path_count"], 1);
         assert_eq!(j["referenced_paths_exist"], false);
         assert_eq!(j["usages"][0]["exists"], false);
@@ -159,7 +159,7 @@ fn missing_references_print_incomplete_list_but_do_not_redefine_trace_completene
 }
 
 #[test]
-fn missing_list_retains_existing_members_and_corrupt_libraries_still_refuse() {
+fn missing_list_retains_existing_members_and_corrupt_libraries_as_unknown() {
     let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dependencies");
     let work = std::env::temp_dir().join(format!("oxblend-mixed-list-{}", std::process::id()));
     std::fs::create_dir(&work).unwrap();
@@ -216,7 +216,16 @@ fn missing_list_retains_existing_members_and_corrupt_libraries_still_refuse() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert!(out.stdout.is_empty());
+    let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(j["complete"], false);
+    assert_eq!(j["problem_counts"]["library_read"], 1);
+    assert_eq!(j["errors"][0]["status"], "unknown");
+    assert!(
+        j["errors"][0]["library_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("mesh-material-library.blend")
+    );
     std::fs::remove_dir_all(work).unwrap();
 }
 
@@ -302,7 +311,17 @@ fn facts_failures_name_the_file_and_field_in_words() {
         );
         assert!(!message.contains("Field(["));
         assert!(message.contains("use trace for cross-file dependencies"));
-        assert!(out.stdout.is_empty());
+        // Missing closure fields now follow the reports-always-complete ruling:
+        // keep independent facts and identify the unknown site, not empty stdout.
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(report["complete"], false);
+        assert_eq!(j["error"]["kind"], "incomplete_facts");
+        assert!(report["facts"]["blocks"].is_object());
+        assert!(report["errors"].as_array().unwrap().iter().any(|e| {
+            e["site"]["field_path"]
+                .as_array()
+                .is_some_and(|path| path.iter().any(|p| p == field))
+        }));
     }
 }
 

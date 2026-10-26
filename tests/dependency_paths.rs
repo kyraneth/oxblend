@@ -67,8 +67,10 @@ fn external_text_and_script_paths_have_physical_field_provenance() {
         ("shader-script.blend", "//shader.osl", "filepath"),
     ] {
         let (r, j) = cli(&fixture(name));
-        assert_eq!(r.status.code(), Some(0), "{name}: {j}");
-        assert_eq!(j["complete"], true);
+        assert_eq!(r.status.code(), Some(2), "{name}: {j}");
+        assert_eq!(j["complete"], false);
+        assert_eq!(j["missing_path_count"], 1);
+        assert!(j["errors"].as_array().unwrap().is_empty());
         assert_eq!(paths(&j), [oxblend::value::hex(path.as_bytes())]);
         let u = &j["usages"][0];
         assert_eq!(u["is_sequence"], false);
@@ -138,8 +140,13 @@ fn selected_library_material_uses_the_same_script_storage_contract_as_root() {
         std::fs::write(&child, bytes).unwrap();
         for root in [&child, &work.0.join("root.blend")] {
             let (r, j) = cli(root);
-            assert_eq!(r.status.code(), Some(0), "{mode}: {j}");
-            assert_eq!(j["complete"], true);
+            assert_eq!(
+                r.status.code(),
+                Some(if dependency { 2 } else { 0 }),
+                "{mode}: {j}"
+            );
+            assert_eq!(j["complete"], !dependency);
+            assert_eq!(j["missing_path_count"], usize::from(dependency));
             assert!(j["errors"].as_array().unwrap().is_empty());
             let scripts: Vec<_> = j["usages"]
                 .as_array()
@@ -502,18 +509,10 @@ fn object_data_requires_its_discriminated_id_family_count_and_sdna_extent() {
         let (r, j) = cli(&work.0.join("root.blend"));
         assert_eq!(
             r.status.code(),
-            Some(if matches!(case, "null" | "linked-valid") {
-                0
-            } else {
-                2
-            }),
+            Some(if case == "null" { 0 } else { 2 }),
             "{case}: {j}"
         );
-        assert_eq!(
-            j["complete"],
-            matches!(case, "null" | "linked-valid"),
-            "{case}: {j}"
-        );
+        assert_eq!(j["complete"], case == "null", "{case}: {j}");
         if case == "null" {
             assert!(
                 !j["usages"]
@@ -648,20 +647,23 @@ fn missing_linked_ids_are_typed_incomplete_and_publish_other_existing_members() 
             .any(|u| u["block_type"] == "Image"),
         "{j}"
     );
-    // Missing linked IDs still refuse; 1.3.1 partial listings cover only
-    // missing physical assets/libraries, not an incomplete serialized trace.
+    // Known missing linked IDs retain the entire physical listing and
+    // separate ID markers; they never mislabel an existing library missing.
     let listing = Command::new(env!("CARGO_BIN_EXE_oxblend"))
         .arg("list")
         .arg(&root)
         .output()
         .unwrap();
     assert_eq!(listing.status.code(), Some(2));
-    assert!(listing.stdout.is_empty());
+    let text = String::from_utf8(listing.stdout).unwrap();
+    assert_eq!(text.matches("[missing linked ID]").count(), 2);
+    assert!(text.contains("texture.png"));
     let listing_error: serde_json::Value = serde_json::from_slice(&listing.stderr).unwrap();
     assert_eq!(listing_error["error"]["kind"], "incomplete_trace");
     let noop_output = work.0.join("noop-pack");
     let noop = Command::new(env!("CARGO_BIN_EXE_oxblend"))
         .arg("pack")
+        .arg("--permissive")
         .arg(&root)
         .arg(&noop_output)
         .arg("-p")
@@ -678,6 +680,7 @@ fn missing_linked_ids_are_typed_incomplete_and_publish_other_existing_members() 
     let output = work.0.join("pack");
     let r = Command::new(env!("CARGO_BIN_EXE_oxblend"))
         .arg("pack")
+        .arg("--permissive")
         .arg(&root)
         .arg(&output)
         .arg("-p")
@@ -753,7 +756,8 @@ fn external_text_and_script_storage_wrong_types_refuse() {
 fn bake_target_is_version_local_and_modern_targets_still_control_disk_paths() {
     for name in ["bake-old.blend", "bake-modern.blend"] {
         let (r, j) = cli(&fixture(name));
-        assert_eq!(r.status.code(), Some(0), "{name}: {j}");
+        assert_eq!(r.status.code(), Some(2), "{name}: {j}");
+        assert_eq!(j["problem_counts"]["missing_asset"], 1);
         assert_eq!(paths(&j), [oxblend::value::hex(b"//bake-cache")]);
         assert_eq!(j["usages"][0]["is_sequence"], true);
     }
@@ -766,7 +770,8 @@ fn bake_target_is_version_local_and_modern_targets_still_control_disk_paths() {
         let source = work.0.join("bake.blend");
         std::fs::write(&source, bytes).unwrap();
         let (r, j) = cli(&source);
-        assert_eq!(r.status.code(), Some(0), "{j}");
+        assert_eq!(r.status.code(), Some(if expected { 2 } else { 0 }), "{j}");
+        assert_eq!(j["missing_path_count"], usize::from(expected));
         assert_eq!(!paths(&j).is_empty(), expected);
     }
 }
@@ -855,7 +860,8 @@ fn pack_reports_new_external_script_obligations_as_incomplete_when_missing() {
 #[test]
 fn real_library_headers_emit_at_root_but_unselected_child_headers_do_not() {
     let (r, j) = cli(&fixture("unused-library-root.blend"));
-    assert_eq!(r.status.code(), Some(0), "{j}");
+    assert_eq!(r.status.code(), Some(2), "{j}");
+    assert_eq!(j["problem_counts"]["missing_library"], 1);
     assert_eq!(paths(&j), [oxblend::value::hex(b"//unused.blend")]);
     let work = Work::new();
     std::fs::copy(fixture("group-root.blend"), work.0.join("root.blend")).unwrap();

@@ -24,7 +24,9 @@
 //!   cargo test --offline --locked --test malformed_input structure_aware_mutants -- --nocapture
 //! ```
 
-use oxblend::BlendFile;
+use oxblend::{BlendFile, value::PathStep};
+#[path = "support/pointed_arrays.rs"]
+mod arrays_fixture;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
@@ -547,6 +549,7 @@ fn corpus() -> Vec<Case> {
         ("legacy-synthetic", synthetic_legacy()),
         ("format1-synthetic", synthetic_format1()),
         ("native-cross-id", fixture("trace-owner/cross-id.blend")),
+        ("pointed-arrays", arrays_fixture::synthetic(true, 8)),
     ];
     let mut cases = Vec::new();
     let mut state = 0x5eed_1234_abcd_9876u64;
@@ -574,6 +577,24 @@ fn corpus() -> Vec<Case> {
 
 // --------------------------------------------------------------- reader run
 
+fn array_probes(file: &BlendFile) -> usize {
+    let mut operations = 0;
+    for (block_index, block) in file.blocks().iter().enumerate() {
+        let Some(structure) = file.schema().structs.get(block.sdna_index) else {
+            continue;
+        };
+        for field in &structure.fields {
+            let path = [PathStep::Field(field.name.clone())];
+            // Boundary adversaries, not work budgets: zero, one item, platform MAX.
+            for count in [0, 1, usize::MAX] {
+                let _ = file.byte_array(block_index, 0, &path, count);
+                let _ = file.pointer_table(block_index, 0, &path, count);
+                operations += 2;
+            }
+        }
+    }
+    operations
+}
 fn parse_quiet(bytes: &[u8]) -> Result<BlendFile, String> {
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
@@ -622,6 +643,7 @@ fn consistent(bytes: &[u8], file: &BlendFile) -> Result<(), String> {
 fn structure_aware_mutants_never_panic_and_never_accept_corrupt_input() {
     let cases = corpus();
     let mut accepted = 0usize;
+    let mut array_operations = 0;
     for case in &cases {
         match parse_quiet(&case.bytes) {
             Ok(file) => {
@@ -633,6 +655,9 @@ fn structure_aware_mutants_never_panic_and_never_accept_corrupt_input() {
                 );
                 consistent(&case.bytes, &file)
                     .unwrap_or_else(|problem| panic!("{}: {}", case.name, problem));
+                array_operations +=
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| array_probes(&file)))
+                        .unwrap_or_else(|_| panic!("{}: array read panicked", case.name));
                 accepted += 1;
             }
             Err(reason) => {
@@ -649,6 +674,7 @@ fn structure_aware_mutants_never_panic_and_never_accept_corrupt_input() {
     }
     println!("MALFORMED_CASES={}", cases.len());
     println!("MALFORMED_ACCEPTED={accepted}");
+    println!("MALFORMED_ARRAY_OPERATIONS={array_operations}");
     fuzz_target_single_input();
 }
 
@@ -710,6 +736,11 @@ fn cli_cases() -> Vec<Case> {
         fixture("trace-owner/cross-id.blend"),
     );
 
+    accept(
+        &mut cases,
+        "pointed-arrays-valid",
+        arrays_fixture::synthetic(true, 8),
+    );
     let head = layout.heads[0];
     reject(
         &mut cases,
@@ -797,12 +828,48 @@ fn cli_refuses_corrupt_input_without_panicking() {
     for case in &cases {
         let path = work.0.join(case.name.replace('/', "_"));
         std::fs::write(&path, &case.bytes).unwrap();
-        for command in ["summary", "list", "blocks", "trace"] {
-            let output = Command::new(&binary)
-                .arg(command)
-                .arg(&path)
-                .output()
-                .unwrap();
+        for command in [
+            "summary",
+            "list",
+            "blocks",
+            "trace",
+            "query",
+            "get-bytes",
+            "get-table",
+        ] {
+            let mut process = Command::new(&binary);
+            process
+                .arg(if command.starts_with("get-") {
+                    "get"
+                } else {
+                    command
+                })
+                .arg(&path);
+            if command.starts_with("get-") {
+                process.args([
+                    "0",
+                    if command == "get-bytes" {
+                        "[\"label\"]"
+                    } else {
+                        "[\"parts\"]"
+                    },
+                    if command == "get-bytes" {
+                        "--byte-array"
+                    } else {
+                        "--pointer-table"
+                    },
+                    &usize::MAX.to_string(),
+                ]);
+            }
+            if command == "query" {
+                process.args([
+                    "--type",
+                    "Scene",
+                    "--fields",
+                    "id.name,r.sfra,render,view_layers,compositor,id_properties,collection.graph",
+                ]);
+            }
+            let output = process.output().unwrap();
             runs += 1;
             let code = output
                 .status
@@ -863,6 +930,7 @@ fn fuzz_target_single_input() {
     match parse_quiet(&bytes) {
         Ok(file) => {
             consistent(&bytes, &file).expect("accepted input is not self-consistent");
+            array_probes(&file);
             println!(
                 "FUZZ_INPUT={} bytes={} accepted",
                 path.display(),

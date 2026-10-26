@@ -5,7 +5,8 @@
 # 2. The engine source has no socket, DNS or HTTP call and no telemetry client.
 #
 # URL literals are reported rather than failed: the only ones in src/ are the
-# xxHash licence header and the remote pack-target prefixes that pack refuses.
+# xxHash licence header, refused remote pack-target prefixes, and the fixed
+# manual GitHub issue prefill (data only; never opened or uploaded by the CLI).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -34,7 +35,7 @@ if [ -n "$hits" ]; then
 fi
 
 urls=$(grep -rn 'https\?://' src/ --include='*.rs' | wc -l)
-printf 'no-network: %s URL literal line(s) in src/ (licence header and refused remote pack targets)\n' "$urls"
+printf 'no-network: %s URL literal line(s) in src/ (licence, refused remote targets, fixed manual issue link)\n' "$urls"
 
 [ "$fail" -eq 0 ] || exit 1
 printf 'NO-NETWORK EXIT=0\n'

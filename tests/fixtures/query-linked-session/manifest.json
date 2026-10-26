@@ -1,0 +1,9 @@
+{
+  "blender": "5.2.1 LTS",
+  "build_hash": "9e2066aef7ef",
+  "files": {
+    "group-library.blend": "e50156d5c27622c7ff01cf10fdfb589d96b6845113260913104f9fc58739e3d3",
+    "forwarded.blend": "944b222163fefcb3c9fa0dc8c702b809eae73b8b77894378c074e91a6d0cc066",
+    "root.blend": "e6ba3c4208d38847ded5786ebe1b1fcb96ad4b34dbe461bc5d762351c393fa1a"
+  }
+}

@@ -1,0 +1,32 @@
+[build-system]
+# Reviewed against PyPI release metadata on 2026-10-22.
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
+
+[project]
+name = "oxblend"
+# Version 1.4.0 is read from Cargo.toml (one crate/wheel version).
+dynamic = ["version"]
+description = "Typed, explicit reads and writers of saved Blender files without Blender"
+requires-python = ">=3.11"
+license = "MIT"
+readme = { file = "README.md", content-type = "text/markdown" }
+classifiers = [
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+]
+
+# Public MIT release metadata: the public repository is kyraneth/oxblend.
+[project.urls]
+Homepage = "https://github.com/kyraneth/oxblend"
+Repository = "https://github.com/kyraneth/oxblend"
+Issues = "https://github.com/kyraneth/oxblend/issues"
+
+[tool.maturin]
+# Cargo mode retains the engine path dependency; normalize_sdist.py fixes
+# maturin 1.15.0's relocated README metadata without changing source layout.
+sdist-generator = "cargo"
+python-source = "python"
+module-name = "oxblend._native"
+include = ["python/oxblend/guidance/**", "python/oxblend/*.pyi", "python/oxblend/py.typed", "python/oxblend/THIRD-PARTY-NOTICES.txt"]

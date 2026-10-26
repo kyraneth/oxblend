@@ -1,0 +1,22 @@
+{
+  "author": "Zamil",
+  "version": "5.2.1 LTS",
+  "build_hash": "9e2066aef7ef",
+  "sequence": {
+    "filepath": "//shot.0001.png",
+    "source": "SEQUENCE",
+    "frames": 3,
+    "offset": 2,
+    "sfra": 17,
+    "members": [
+      3,
+      4,
+      5
+    ]
+  },
+  "render": {
+    "source": "RENDER",
+    "image": null,
+    "scene": "Scene"
+  }
+}

@@ -119,7 +119,33 @@ fn run(binary: &Path, path: &Path, flags: &[&str]) -> Output {
         .unwrap()
 }
 fn normalized(output: &[u8], path: &Path) -> String {
-    String::from_utf8_lossy(output).replace(path.to_str().unwrap(), "<INPUT>")
+    let text = String::from_utf8_lossy(output);
+    let mut normalized = text
+        .lines()
+        .map(|line| {
+            if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(line)
+                && value["schema"] == 1
+                && value["error"].is_object()
+                && let Some(receipt) = value.as_object_mut().unwrap().remove("diagnostic")
+            {
+                // Invocation identity and stream hashes intentionally differ by
+                // container. Compare all stable error fields, not a random ID.
+                assert_eq!(receipt["schema"], "oxblend.failure-receipt/v1");
+                assert_eq!(receipt["command"], "blocks");
+                assert_eq!(
+                    receipt["binding"]["stdout_sha256"].as_str().unwrap().len(),
+                    64
+                );
+                return value.to_string();
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized.replace(path.to_str().unwrap(), "<INPUT>")
 }
 #[test]
 fn all_containers_keep_default_limit_address_dump_and_record_zero_semantics() {

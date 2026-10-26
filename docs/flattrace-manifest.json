@@ -1,0 +1,2223 @@
+{
+  "schema": "oxblend.flattrace-manifest/v1",
+  "format": "flattrace/v1",
+  "api": "0.1",
+  "levels": [
+    1,
+    2
+  ],
+  "policy": {
+    "default": "off",
+    "opt_in": "nonempty FLATTRACE_DIR and FLATTRACE_LEVEL != 0",
+    "paths": "full local paths only after opt-in; review/redact exports",
+    "finish": "0.1 finish has empty root end data; root.summary point on root owns outputs/resources"
+  },
+  "root": {
+    "start": {
+      "command": "string",
+      "mode": "string",
+      "requested_mode": "string",
+      "mode_source": "string",
+      "inputs": "array",
+      "version": "string",
+      "privacy": "object",
+      "env": "object"
+    },
+    "summary": {
+      "outputs": "array",
+      "resource": "object",
+      "diagnostics_complete": "boolean"
+    }
+  },
+  "commands": {
+    "extract": {"modes":["report"],"scenarios":["success","usage","open_error","operation_error"],"success":{"ordered":[{"path":["run"]},{"path":["run","extract"]},{"path":["run","extract","extract.operation"]},{"path":["run","**","extract.select"]},{"path":["run","**","extract.closure"]},{"path":["run","**","extract.publish"]},{"path":["run","**","serialize"]}],"events":[{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],"errors":[]}},
+    "node-tree": {"modes":["report"],"scenarios":["success","usage","open_error","sdna_error","operation_error"],"success":{"ordered":[{"path":["run"]},{"path":["run","node-tree"]},{"path":["run","node-tree","node_tree_inspect"]},{"path":["run","**","file.open"]},{"path":["run","**","index"]},{"path":["run","**","schema"]},{"path":["run","**","serialize"]}],"events":[{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],"errors":[]}},
+    "catalog": {"modes":["report"],"scenarios":["success","usage","operation_error"],"success":{"ordered":[{"path":["run"]},{"path":["run","catalog"]},{"path":["run","**","catalog.evaluate"]},{"path":["run","**","serialize"]}],"events":[{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],"errors":[]}},
+    "explain": {"modes":["report"],"scenarios":["success","usage","operation_error"],"success":{"ordered":[{"path":["run"]},{"path":["run","explain"]},{"path":["run","**","explain.evaluate"]},{"path":["run","**","serialize"]}],"events":[{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],"errors":[]}},
+    "query": {"modes":["report"],"scenarios":["success","usage","operation_error"],"success":{"ordered":[{"path":["run"]},{"path":["run","query"]},{"path":["run","**","file.open"]},{"path":["run","**","index"]},{"path":["run","**","schema"]},{"path":["run","**","query.evaluate"]},{"path":["run","**","query.select"]},{"path":["run","**","serialize"]}],"events":[{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],"errors":[]}},
+    "exr-pixels": {"modes":["report"],"scenarios":["success","usage","operation_error"],"success":{"ordered":[{"path":["run"]},{"path":["run","exr-pixels"]},{"path":["run","**","exr.pixels"]},{"path":["run","**","file.open"]},{"path":["run","**","exr.select"]},{"path":["run","**","exr.decode"]},{"path":["run","**","exr.verify"]},{"path":["run","**","write"]},{"path":["run","**","publish"]},{"path":["run","**","serialize"]}],"events":[{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],"errors":[]}},
+    "exr-scan": {"modes":["report"],"scenarios":["success","usage","operation_error"],"success":{"ordered":[{"path":["run"]},{"path":["run","exr-scan"]},{"path":["run","**","file.open"]},{"path":["run","**","serialize"]}],"events":[{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],"errors":[]}},
+    "summary": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "summary"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "inspect": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "inspect"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "get": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "get"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "pointer": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "pointer"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "payload": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "payload"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "read-batch": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "read-batch"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "source-facts": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "source-facts"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "library-facts": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "library-facts"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "trace": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "trace"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.file"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.select"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.edges"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.assets"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "list": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "list"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.file"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.select"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.edges"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.assets"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "blocks": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "blocks"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "overrides": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "overrides"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "pointer-census": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "pointer-census"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "diff": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "diff"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "edit": {
+      "required_success_phases": ["write", "publish"],
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "edit"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "rewrite": {
+      "required_success_phases": ["write", "publish"],
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "rewrite"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "pack": {
+      "execution_phases": ["pack.execute", "write", "publish"],
+      "modes": [
+        "strict",
+        "permissive"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "pack"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "pack.operation"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "pack.plan"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.file"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.select"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.edges"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.assets"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "pack-sequence": {
+      "execution_phases": ["pack.execute", "write", "publish"],
+      "modes": [
+        "strict",
+        "permissive"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "pack-sequence"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "pack.operation"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "pack.plan"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "index"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "schema"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.file"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.select"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.edges"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "walk.assets"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "exr-header": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "exr-header"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "file.open"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "skill": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "skill"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "report": {
+      "modes": ["report"],
+      "scenarios": ["success", "usage", "operation_error"],
+      "success": {
+        "ordered": [{"path":["run"]}, {"path":["run","report"]}, {"path":["run","**","serialize"]}],
+        "events": [{"event":"root.summary","state":"point","attributes":{"outputs":"array","resource":"object","diagnostics_complete":"boolean"}}],
+        "errors": []
+      }
+    },
+    "help": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "help"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "version": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "version"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "**",
+              "serialize"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "invalid": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          },
+          {
+            "path": [
+              "run",
+              "invalid"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    },
+    "library": {
+      "modes": [
+        "report"
+      ],
+      "scenarios": [
+        "success",
+        "usage",
+        "open_error",
+        "sdna_error",
+        "operation_error"
+      ],
+      "success": {
+        "ordered": [
+          {
+            "path": [
+              "run"
+            ]
+          }
+        ],
+        "events": [
+          {
+            "event": "root.summary",
+            "state": "point",
+            "attributes": {
+              "outputs": "array",
+              "resource": "object",
+              "diagnostics_complete": "boolean"
+            }
+          }
+        ],
+        "errors": []
+      }
+    }
+  },
+  "scenarios": {
+    "success": {
+      "select": {
+        "outcome": "ok"
+      }
+    },
+    "usage": {
+      "select": {
+        "error_kind": "usage"
+      },
+      "ordered": [
+        {
+          "path": [
+            "run"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "{command}"
+          ]
+        }
+      ],
+      "forbidden": [
+        "file.open",
+        "index",
+        "schema"
+      ],
+      "errors": [
+        "usage"
+      ]
+    },
+    "open_error": {
+      "select": {
+        "phase": "open"
+      },
+      "ordered": [
+        {
+          "path": [
+            "run"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "file.open"
+          ]
+        }
+      ],
+      "forbidden": [
+        "schema"
+      ],
+      "errors": [
+        "{error_kind}"
+      ]
+    },
+    "sdna_error": {
+      "select": {
+        "phase": "sdna"
+      },
+      "ordered": [
+        {
+          "path": [
+            "run"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "index"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "schema"
+          ]
+        }
+      ],
+      "errors": [
+        "invalid_sdna"
+      ]
+    },
+    "operation_error": {
+      "select": {
+        "error_kind": "{error_kind}"
+      },
+      "ordered": [
+        {
+          "path": [
+            "run"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "{command}"
+          ]
+        }
+      ],
+      "errors": [
+        "{error_kind}"
+      ]
+    }
+  },
+  "conditions": {
+    "node_tree_edit": {"ordered":[{"path":["run"]},{"path":["run","edit"]},{"path":["run","edit","node_tree_edit"]},{"path":["run","edit","node_tree_edit","node_tree.plan"]},{"path":["run","**","file.open"]},{"path":["run","**","index"]},{"path":["run","**","schema"]},{"path":["run","edit","node_tree_edit","node_tree.validate"]},{"path":["run","edit","node_tree_edit","node_tree.emit"]},{"path":["run","edit","node_tree_edit","write"]},{"path":["run","edit","node_tree_edit","write","node_tree.verify"]},{"path":["run","edit","node_tree_edit","publish"]}],"events":[],"forbidden":[]},
+    "error_help": {"select":{"error_help":true}, "ordered":[{"path":["run","help","error.help"]}]},
+    "report_preview": {"select":{"report_preview":true}, "ordered":[{"path":["run","report","report.snapshot"]}]},
+    "report_create": {"select":{"report_create":true}, "ordered":[{"path":["run","report","**","write"]},{"path":["run","report","**","publish"]}]},
+    "file_query": {"select":{"file_query":true},"ordered":[{"path":["run","**","file.open"]},{"path":["run","**","index"]},{"path":["run","**","schema"]}]},
+    "query_project": {"select":{"query_project":true},"ordered":[{"path":["run","**","query.project"]}]},
+    "compressed": {
+      "select": {
+        "compressed": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "decode"
+          ]
+        }
+      ]
+    },
+    "hash": {
+      "select": {
+        "hash": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "hash"
+          ]
+        }
+      ]
+    },
+    "copy": {
+      "select": {
+        "copy": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "copy"
+          ]
+        }
+      ]
+    },
+    "durability": {
+      "select": {
+        "durability": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "durability"
+          ]
+        }
+      ]
+    },
+    "publish": {
+      "select": {
+        "publish": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "publish"
+          ]
+        }
+      ]
+    },
+    "resolve": {
+      "select": {
+        "resolve": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "query.resolve"
+          ]
+        }
+      ]
+    },
+    "pack_execute": {
+      "select": {
+        "pack_execute": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "pack.execute"
+          ]
+        }
+      ]
+    },
+    "retained_reuse": {
+      "select": {
+        "retained_reuse": true
+      },
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "reader.reuse"
+          ]
+        }
+      ]
+    },
+    "dry_run": {
+      "select": {
+        "dry_run": true
+      },
+      "forbidden": [
+        "pack.execute",
+        "write",
+        "publish",
+        "durability"
+      ]
+    },
+    "strict_refusal": {
+      "select": {
+        "strict_refusal": true
+      },
+      "forbidden": [
+        "pack.execute",
+        "write",
+        "publish"
+      ],
+      "events": [
+        {
+          "event": "decision",
+          "state": "point",
+          "attributes": {
+            "item": "string",
+            "kind": "string",
+            "reason": "string"
+          }
+        }
+      ]
+    }
+  },
+  "work_aliases": {"decode":["decode.frame","decode.scan"]},
+  "aggregated": {
+    "query.resolve": "hot.summary",
+    "query.project": "hot.summary",
+    "read.byte_array": "hot.summary",
+    "read.pointer_table": "hot.summary",
+    "decode.frame": "hot.summary",
+    "decode.scan": "hot.summary"
+  },
+  "events": {
+    "hot.summary": {"attributes":{"event":"string","count":"number","total_ns":"number","max_ns":"number","bytes":"number","input_bytes":"number","error_records":"number","outcomes":"object"}},
+    "node_tree.operation": {"attributes":{"operation_index":"number","applied":"boolean"}},
+    "decision": {
+      "state": "point",
+      "attributes": {
+        "item": "string",
+        "kind": "string",
+        "reason": "string"
+      }
+    },
+    "error": {
+      "state": "point",
+      "note": "Hot scope error points retain hot_event (phase name); ordinary span errors may carry null. hot.summary.error_records reconciles points on the captured structural owner.",
+      "attributes": {
+        "kind": "string",
+        "message": "string"
+      }
+    },
+    "raw.window.miss": {
+      "state": "point",
+      "attributes": {
+        "path": "string",
+        "offset": "number",
+        "length": "number"
+      }
+    },
+    "raw.capture.selective": {
+      "state": "point",
+      "attributes": {
+        "path": "string",
+        "decoded_len": "number",
+        "blocks": "number"
+      }
+    },
+    "raw.publish.plan": {
+      "state": "point",
+      "attributes": {
+        "path": "string",
+        "output": "string",
+        "edits": "number",
+        "clears": "number",
+        "edit_keys": "array",
+        "clear_keys": "array",
+        "reader": "object"
+      }
+    }
+  },
+  "binding": {
+    "open": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.open"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "file.open"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "index"
+          ]
+        },
+        {
+          "path": [
+            "run",
+            "**",
+            "schema"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "header": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.header"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "blocks": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.blocks"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "get": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.get"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "pointer": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.pointer"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "summary": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.summary"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "close": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.close"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "closed": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.closed"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "enter": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.enter"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "exit": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.exit"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    },
+    "transport": {
+      "ordered": [
+        {
+          "path": [
+            "run",
+            "**",
+            "api.transport"
+          ]
+        }
+      ],
+      "events": [],
+      "errors": []
+    }
+  },
+  "phases": {
+    "decode.frame": {"min_level":2,"start":{"format":"string","frame":"number","scope":"string"},"ok_end":{"bytes":"number","input_bytes":"number","decoded_bytes":"number","physical_bytes":"number"}},
+    "decode.scan": {"min_level":2,"start":{"format":"string","scope":"string","coverage":"string"},"ok_end":{"bytes":"number"}},
+    "input.paths": {"start":{"path_hex":"string","nul_delimited":"boolean"},"ok_end":{"entries":"number"}},
+    "trace.root": {"start":{"input_path_hex":"string"}},
+    "cross_reference": {"start":{"roots":"number"}},
+    "extract": {"start":{}},
+    "extract.operation": {"start":{"path":"string"}},
+    "extract.select": {"start":{"requested_ids":"array"}},
+    "extract.closure": {"start":{}},
+    "extract.publish": {"start":{"bytes":"number"}},
+    "node_tree_inspect": {"start":{"path":"string","profile_build":"string"}},
+    "node_tree_edit": {"start":{"path":"string","profile_build":"string"}},
+    "node_tree.plan": {"start":{"spec_schema":"number"}},
+    "node_tree.validate": {"start":{"tree_block":"number","profile_build":"string"}},
+    "node_tree.apply": {"start":{"tree_block":"number","operation":"string","operation_index":"number"}},
+    "node_tree.emit": {"start":{"tree_block":"number","changed_original_blocks":"number","added_blocks":"number"}},
+    "node_tree.verify": {"start":{"decoded_bytes":"number"}},
+    "error.help": {"start":{"catalog_version":"string"}},
+    "report.snapshot": {"start":{"privacy_profile":"string","network":"boolean"}},
+    "read.byte_array": {"min_level":2,"start":{"block_index":"number","element":"number","path":"string","count":"number"}},
+    "read.pointer_table": {"min_level":2,"start":{"block_index":"number","element":"number","path":"string","count":"number"}},
+    "python.call": {"start":{"operation":"string","argument_count":"number","effective_policy":"string","native_module":"object","binding_version":"string","engine_version":"string","build_commit":"string","run_identity":"object"}},
+    "trace.operation": {"start":{"path":"string"}},
+    "session.open": {"start":{"memory":"string"}},
+    "session.read": {"start":{}},
+    "session.query": {"start":{}},
+    "session.trace": {"start":{}},
+    "session.pack": {"start":{"memory":"string"}},
+    "pack.plan": {"start":{"memory":"string"}},
+    "query.library.open": {"start":{"path_hex":"string","purpose":"string"}},
+    "hash": {"start":{"algorithm":"string"},"ok_end":{"bytes":"number"}},
+    "copy": {"start":{"path":"string"},"ok_end":{"bytes":"number"}},
+    "decode": {"start":{"format":"string"}},
+    "durability": {"start":{"mechanism":"string"}},
+    "query.project": {"min_level":2,"start":{"field":"string","block_index":"number","element":"number"}},
+    "query.resolve": {"min_level":2,"start_any":[{"address":"string","role":"string"},{"owner":"string"},{"command":"string"},{"block_index":"number","element":"number","field":"string"}]},
+    "reader.reuse": {"start":{"path":"string"}},
+    "serialize": {"start":{"role":"string"}},
+    "walk.file": {"start":{"path":"string","selected":"boolean"}},
+    "walk.select": {"start":{"path":"string"}},
+    "walk.edges": {"start":{"seeds":"number"}},
+    "walk.assets": {"start":{"owners":"number"}},
+    "pack.operation": {"start":{"roots":"number","dry_run":"boolean","path":"string"}},
+    "pack.execute": {"start":{"files":"number"}},
+    "file.open": {
+      "start": {
+        "path": "string"
+      }
+    },
+    "index": {
+      "start": {
+        "decoded_bytes": "number"
+      }
+    },
+    "schema": {
+      "start": {
+        "bytes": "number"
+      }
+    },
+    "publish": {
+      "start": {
+        "path": "string"
+      },
+      "end": {
+        "output_written": "boolean",
+        "durability_completed": "boolean"
+      }
+    }
+  },
+  "error_records": {
+    "end_error": "Each end error requires a preceding error point on the exact same span, preserving kind and message; propagation is explicitly labelled."
+  }
+}

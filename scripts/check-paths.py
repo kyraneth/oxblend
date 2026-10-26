@@ -41,8 +41,15 @@ LIST = ('ListBase', 16, [('void', '*first'), ('void', '*last')])
 
 
 def image(path, sequence=False):
-    return saved([ID, ('Image', 1100, [('ID', 'id'), ('char', 'name[1024]'), ('int', 'source')])],
-                 [(b'IM', 100, 1, fixed(b'IMasset', 72) + fixed(path, 1024) + struct.pack('<i', 2 if sequence else 1))])
+    structures = [ID, ('Image', 1100, [('ID', 'id'), ('char', 'name[1024]'), ('int', 'source')])]
+    records = [(b'IM', 100, 1, fixed(b'IMasset', 72) + fixed(path, 1024) + struct.pack('<i', 2 if sequence else 1))]
+    if sequence:
+        # Prove the two-frame saved requirement instead of relying on a glob's
+        # nonempty matches. Keep this test about literal directory spelling.
+        structures += [('ImageUser', 16, [('int', 'frames'), ('int', 'offset'), ('int', 'flag'), ('int', 'framenr')]),
+                       ('Tex', 96, [('ID', 'id'), ('Image', '*ima'), ('ImageUser', 'iuser')])]
+        records += [(b'TE', 200, 3, fixed(b'TEuser', 72) + struct.pack('<Qiiii', 100, 2, 0, 1, 0))]
+    return saved(structures, records)
 
 
 class Paths(unittest.TestCase):
@@ -68,6 +75,9 @@ class Paths(unittest.TestCase):
             (b'DATA', 300, 4, struct.pack('<QQiQ', 0, 0, 3, 400)+bytes(16)),
             (b'DATA', 400, 5, fixed(b'//', 1024)+struct.pack('<Q', 500)),
             (b'DATA', 500, 6, fixed(b'clip.mov', 256))]))
+        # #31: complete now includes availability; keep this path-spelling
+        # regression dependency-complete instead of testing an absent clip.
+        (self.root/'clip.mov').write_bytes(b'clip')
         r, data = self.run_cli('trace', self.input)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(bytes.fromhex(data['usages'][0]['asset_path_hex']), b'//clip.mov')

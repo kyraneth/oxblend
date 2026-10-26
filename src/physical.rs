@@ -27,8 +27,7 @@ impl<'a> Physical<'a> {
         path: &std::path::Path,
     ) -> Option<crate::Result<Option<&crate::edit_container::SeekTable>>> {
         self.snapshot
-            .and_then(|s| s.proof.as_ref())
-            .map(|proof| proof.admit(self.file, path))
+            .map(|snapshot| snapshot.proof.admit(self.file, path))
     }
     pub(crate) fn len(&self) -> Result<u64> {
         Ok(self.file.metadata()?.len())
@@ -55,8 +54,8 @@ impl<'a> Physical<'a> {
         )
     }
     pub(crate) fn family(&self) -> Result<&'static str> {
-        if let Some(proof) = self.snapshot.and_then(|s| s.proof.as_ref()) {
-            return Ok(proof.family);
+        if let Some(snapshot) = self.snapshot {
+            return Ok(snapshot.proof.family);
         }
         let mut magic = [0; 4];
         let n = self.read_at(&mut magic, 0)?;
