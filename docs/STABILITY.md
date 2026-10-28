@@ -1,6 +1,6 @@
 # Stability contract
 
-Oxblend 1.4.0 follows semantic versioning. The compatibility baseline starts at
+Oxblend 1.4.1 follows semantic versioning. The compatibility baseline starts at
 1.0.0. Patch releases fix defects without intentionally
 breaking this contract; minor releases add compatible capabilities; incompatible
 changes to stable interfaces require a new major release. The source is authoritative; `scripts/qualify.sh` checks the inventories
@@ -300,6 +300,23 @@ Original allocations outside reported mutations remain exact; output is raw,
 new-output-only and uses the existing atomic publication/durability mechanism.
 `native_verified:false`/`semantic_verified:false` remain honest runtime facts.
 Native test evidence does not widen the supported version/type boundary.
+
+## Captured decoded equality (v1 repair)
+
+Diff validates both captured decoded inputs before testing exact stream equality.
+Equal decoded bytes return the current v1 complete/equal report with zero rows,
+without a pointer census or field inventory. This is serialized proof, not native
+interpretation or evaluated/render equivalence. The unequal path retains v1
+behavior. The additive Rust API `diff::compare_with_options` accepts
+`diff::CompareOptions { temp_root }` and uses that frozen root for both input
+opens. Legacy `compare`, the CLI and Python resolve the process temp directory
+(`TMPDIR` on Linux, or the platform default) once per comparison. There is no
+report spool in this v1 repair. Original source FD guards include ctime and wrap
+decode, range reads and the final verdict. Detectable in-place mutation is
+`input_changed`; replacement paths are never reopened to certify equality and
+may conservatively refuse if unlinking changes the captured inode's ctime.
+The root is used when spilling, not prevalidated for raw inputs. Unnamed decoded
+spill IO failures remain errors.
 
 ## Public Rust API
 
@@ -922,7 +939,7 @@ Trace usages add `resolved_path_hex`, UTF-8-or-null `resolved_path`, and `exists
 
 Trace/list full-info/pack/edit/rewrite add UTF-8-or-null aliases beside authoritative hex path/name/field/type fields, recursively. Component/path arrays are null if any component is invalid UTF-8. Existing aliases retain their meanings. Binary payload/bit fields remain hex. Ordinary list JSON retains its native-byte map encoding.
 
-Diff adds `difference_count`, equal to the number of reported differences (not proof that unresolved content is equal). CLI returned comparison/read errors also emit the existing `oxblend.diff/v1` schema (not numeric schema 1) with `equal:null`, `complete:false`, typed `errors`, and empty differences/count 0 because no comparison completed. The original typed stderr error and exit 2 are retained. Argument-count/usage refusals remain stderr-only; Rust `diff::compare` still returns `Err` on those underlying failures. After input container/layout validation, physical byte equality bypasses semantic matching and proves `equal:true` even for opaque/unanchored allocations. `matching` identifies that basis; no Blender evaluation is implied.
+Diff adds `difference_count`, equal to the number of reported differences (not proof that unresolved content is equal). CLI returned comparison/read errors also emit the existing `oxblend.diff/v1` schema (not numeric schema 1) with `equal:null`, `complete:false`, typed `errors`, and empty differences/count 0 because no comparison completed. The original typed stderr error and exit 2 are retained. Argument-count/usage refusals remain stderr-only; Rust `diff::compare` still returns `Err` on those underlying failures. After both captured input containers/layouts validate, exact decoded-byte equality bypasses semantic matching and proves `equal:true` even for opaque/unanchored allocations. The equality `matching` text now says "decoded byte equality; no semantic identity reconstruction needed", replacing the earlier physical-byte wording. This is not a Blender evaluation claim.
 
 ## EXR attribute values
 
@@ -1115,7 +1132,7 @@ implementation. **The Python API declared here is stable from its first
 release.** A public name, signature, documented report field or stated behaviour
 is not removed or repurposed in a later release of the same major version;
 breaking one requires a **major-version bump**. The crate and wheel share the
-1.4.0 release version; the first Python release is stable, with no development
+1.4.1 release version; the first Python release is stable, with no development
 or `0.x` exemption from compatibility for callers. Additive engine fields, new optional keywords and new names remain
 compatible.
 
@@ -1179,7 +1196,7 @@ write methods, including `root_paths`, `memory`, `closed` and
   never silently reopens. Changed inputs refuse as `input_changed`. Multi-root
   work requires `open_many(paths)` (or a single `File` it created); separately
   captured arenas are refused with a typed `UsageError`, never merged.
-- **Release-aligned version.** The binding and engine ship as 1.4.0, with the
+- **Release-aligned version.** The binding and engine ship as 1.4.1, with the
   version declared in `bindings/python/Cargo.toml`; `engine_version` names the
   engine it wraps. Because the API is stable from its first release, a breaking
   change needs a major

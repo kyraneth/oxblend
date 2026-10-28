@@ -12,7 +12,7 @@ Read, trace, pack and safely edit Blender `.blend` files without Blender.
 
 A fast Rust library and command-line tool. It tells you what a `.blend` file contains and what it depends on, packs it with its dependencies, and makes guarded edits, all without opening Blender. When it can't be sure, it refuses and says why instead of guessing.
 
-Linux x86_64 · release: **1.4.0**
+Linux x86_64 · release: **1.4.1**
 
 Offline diagnostics: `FLATTRACE_DIR=/path/to/traces oxblend summary scene.blend`.
 Unset/empty is off; no upload. See [local tracing](docs/USAGE.md#local-flattrace-diagnostics).
@@ -39,6 +39,18 @@ oxblend --help
 ```
 
 [Usage](docs/USAGE.md) · [Stability](docs/STABILITY.md) · [For AI agents](AGENTS.md)
+
+For many reads from one file, use the [worked single-open batch recipe](docs/USAGE.md#single-open-read-batches).
+Discover saved SDNA type names from `inspect` (for example `Lamp`, not a guessed
+runtime `Light`), union same-type field paths, and check terminal counts,
+`complete` and `input_changed`. Only inspect/payload/get/pointer are batchable;
+query/overrides/list are not. An empty selection is not proof of no changes.
+
+Read [dependency and pack results](docs/USAGE.md#reading-dependency-and-pack-results)
+as separate warnings, coverage, existence and publication/durability facts.
+`missing_link_counts` is a map, not a scalar. A missing cross-platform built-in
+application asset is still a missing dependency. `FLATTRACE_DIR` enables local
+diagnostic traces; it does not turn incomplete output into a complete result.
 
 ## Pack shots from several sequences
 

@@ -108,6 +108,8 @@ def inventory(root):
         ('src/file_ops/graph.rs', 'e . kind'),
         ('src/file_ops/index.rs', 'e . kind'),
         ('src/file_ops.rs', 's . state'),
+        # Compact census forwards a cached schema-program Error unchanged.
+        ('src/file_ops.rs', 'e . kind'),
         ('src/pack.rs', 'e . kind'),
         # #31 copies a TraceFailure's existing serialized kind into the pack
         # refusal causes. kind_str mirrors TraceFailure.json's enum mapping;

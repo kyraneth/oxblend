@@ -209,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "oxblend"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "exr",
  "flate2",

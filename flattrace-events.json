@@ -1,6 +1,7 @@
 {
   "tool": "oxblend",
   "events": {
+    "diff.work": {"kind":"point","fields":{"inventories":"whole-file inventories constructed on decoded-equal path (zero)","field_walked_allocations":"allocations field-walked on decoded-equal path (zero)"}},
     "extract": {"kind":"span","fields":{}},
     "extract.operation": {"kind":"span","fields":{"path":"source path"}},
     "extract.select": {"kind":"span","fields":{"requested_ids":"exact ID names"}},

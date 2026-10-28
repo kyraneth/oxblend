@@ -50,7 +50,7 @@ python -m pip install oxblend
 ```
 
 - `oxblend.__version__` is the binding version. It is owned only by
-  `bindings/python/Cargo.toml`; crate and wheel ship together as 1.4.0.
+  `bindings/python/Cargo.toml`; crate and wheel ship together as 1.4.1.
 - `oxblend.engine_version` is the Rust engine version the wheel was built from.
 - The packaged native module's own SHA-256 is hashed at import and reported to
   the engine's identity spans; the hosting Python/Blender executable is *not*

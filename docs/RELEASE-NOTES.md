@@ -1,3 +1,58 @@
+# Oxblend 1.4.1 — 2026-10-29
+
+This is a performance release. `diff` output remains `oxblend.diff/v1`; there
+is no default-format change or general completeness improvement for real changes.
+
+- Decoded-equal inputs can return the existing equal report without building a
+  pointer census. Inputs are still validated; captured-generation checks remain.
+  S1 measured the container pair at 197.40 s / 570,248 KiB / 25,877,063 output
+  bytes with shipped 1.4.0 versus 0.36–0.47 s / 20,516 KiB / 707 bytes after S1.
+  This accepted change replaces an inconclusive result with complete/equal and
+  zero rows for validated, decoded-identical input.
+- Diff traversal indexes outgoing edges instead of repeatedly scanning all edges.
+  On the same qualification guest, rename fell from 137.74 s to 9.67 s and the
+  versions comparison from 135.82 s to 10.20 s (S2, relative to the S1 prefix).
+- Buffered decoded spill writes speed up compressed reads. Same-guest wolf-18
+  cold-file requests measured inspect at 11.79–12.99 s before versus 4.67–5.76 s
+  after, and query at 9.02–12.60 s versus 1.57–1.97 s (S2b, relative to S2).
+  These are measured workloads, not universal speed guarantees; inspect RSS
+  overlapped observed run-to-run noise.
+- Compact, schema-backed diff census retention reduces memory without dropping
+  pointer evidence. Three S3 versions trials peaked at 481,948–482,096 KiB,
+  versus 589,396–589,656 KiB before S3, with byte-identical 27,553,702-byte reports.
+  Candidate walls were 9.64–10.11 s versus 10.06–10.90 s. These are incremental
+  slice measurements, not all comparisons against shipped 1.4.0.
+- Deterministic replacement qualification selects the capture phase. This is a
+  qualification control, not a new runtime hook.
+
+### Final matched measurements against shipped 1.4.0
+
+Same qualification guest and exact paired inputs; wall seconds / peak RSS KiB /
+stdout bytes. These are measured workloads, not universal speed guarantees.
+
+| Pair | Shipped 1.4.0 | 1.4.1 | Result |
+|---|---|---|---|
+| l24-sh0019 | 48.29 / 337,820 / 15,343,265 | 5.15 / 272,704 / 15,343,265 | Byte-identical report; incomplete/null. |
+| l24-sh0073 | 63.25 / 354,244 / 16,231,443 | 6.53 / 286,072 / 16,231,443 | Byte-identical report; incomplete/null. |
+| versions-sh0027 | 163.39 / 589,692 / 27,553,708 | 12.32 / 482,100 / 27,553,708 | Byte-identical report; incomplete/null, 3,564 rows. |
+| rename | 300.45 / 595,476 / 27,622,420 | 15.21 / 488,356 / 27,622,420 | Byte-identical report; incomplete/null, 5,270 rows. |
+| container | 279.22 / 570,248 / 25,877,069 | 0.06 / 20,524 / 713 | Accepted decoded-equal repair: complete/equal, zero rows. |
+
+Known limits: real changed production compositions still return incomplete
+results (`complete:false`, `equal:null`). Faster output does not prove authored,
+evaluated-scene or rendered-image equivalence. Very large or unrelated comp
+pairs still run out of memory in `diff`: public Blender 5.2 splash versus
+unrelated was guard-OOM-killed at 17.64 s / 3,268,768 KiB, with no report;
+studio sh0419 was also guard-OOM-killed with no report (GNU wall/peak telemetry
+was not captured). The former's historical 1.4.0 run took 497.194 s /
+7,598,668 KiB before termination, on a different host/guard: this is not a
+matched speed or memory-improvement claim. Large sh0103 delivered an
+incomplete/null report in 42.52 s / 1,594,268 KiB; its 1.4.0 baseline OOM
+delivered no report. Historical public45, native re-save and physical-control
+observations likewise do not establish matched report equivalence.
+The v2 answers, report/default-format change and further verdict work come
+in 1.4.2; they are not included here.
+
 # Oxblend 1.4.0 — 2026-10-26
 
 - Image-source Cryptomatte nodes now resolve their embedded ImageUser through the file's SDNA, enabling the existing sequence/member completeness rules in list, trace and pack; render-source nodes remain non-image users.

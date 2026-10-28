@@ -520,14 +520,16 @@ pub(crate) fn require_spill_space(required: u64, available: u64) -> Result<()> {
     }
     Ok(())
 }
-fn spill_space(destination: &mut Destination<'_>, required: u64) -> Result<()> {
+fn spill_space(destination: &mut Destination<&mut File>, required: u64) -> Result<()> {
     use std::os::fd::AsRawFd;
     let available = match destination.available {
         Some(value) => value,
         None => {
             let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
             // Sample the exact owned O_TMPFILE filesystem once, before writes.
-            if unsafe { libc::fstatvfs(destination.file.as_raw_fd(), stats.as_mut_ptr()) } != 0 {
+            if unsafe { libc::fstatvfs(destination.file.get_ref().as_raw_fd(), stats.as_mut_ptr()) }
+                != 0
+            {
                 return Err(io(std::io::Error::last_os_error()));
             }
             let stats = unsafe { stats.assume_init() };
@@ -626,13 +628,14 @@ pub(crate) fn admit_spill_extent(total: &mut u64, extent: u64, available: u64) -
     Ok(())
 }
 
-struct Destination<'a> {
-    file: &'a mut File,
+struct Destination<W: Write> {
+    // Stdlib's transport buffer coalesces BHead/payload writes; no input cap.
+    file: std::io::BufWriter<W>,
     failed: bool,
     available: Option<u64>,
     admitted: u64,
 }
-impl Write for Destination<'_> {
+impl<W: Write> Write for Destination<W> {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
         let result = self.file.write(data);
         if matches!(result, Ok(0)) && !data.is_empty()
@@ -645,7 +648,105 @@ impl Write for Destination<'_> {
         result
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        self.file.flush()
+        let result = self.file.flush();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod buffered_spill_tests {
+    use super::*;
+
+    fn open_encoded(raw: &[u8], gzip: bool) -> Result<Backing> {
+        let encoded = if gzip {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(raw).unwrap();
+            encoder.finish().unwrap()
+        } else {
+            zstd::stream::encode_all(raw, 0).unwrap()
+        };
+        let temp = std::env::temp_dir();
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .custom_flags(libc::O_TMPFILE)
+            .open(&temp)
+            .unwrap();
+        file.write_all(&encoded).unwrap();
+        Backing::open_file(file, &temp)
+    }
+
+    #[test]
+    fn buffered_spill_open_flushes_tail_before_indexing_both_codecs() {
+        let mut raw = b"BLENDER-v405ENDB".to_vec();
+        raw.extend_from_slice(&[0; 20]);
+        for gzip in [true, false] {
+            let backing = open_encoded(&raw, gzip).unwrap();
+            assert_eq!(backing.len(), raw.len());
+            assert_eq!(backing.range(0, raw.len()).unwrap().as_ref(), raw);
+        }
+    }
+
+    #[test]
+    fn buffered_spill_open_preserves_structural_error_after_buffered_header() {
+        let mut raw = b"BLENDER-v405".to_vec();
+        raw.extend_from_slice(&[0; 24]);
+        for gzip in [true, false] {
+            let error = open_encoded(&raw, gzip).unwrap_err();
+            assert_eq!(error.kind, "invalid_block");
+            assert_eq!(error.message, "zero BHead code is not a native block");
+        }
+    }
+
+    struct FailedSink;
+    impl Write for FailedSink {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from_raw_os_error(libc::ENOSPC))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn buffered_spill_tail_error_is_io_and_not_lost_on_drop() {
+        let mut destination = Destination {
+            file: std::io::BufWriter::new(FailedSink),
+            failed: false,
+            available: None,
+            admitted: 0,
+        };
+        destination.write_all(b"BLENDER-v405").unwrap();
+        assert!(!destination.failed);
+        let error = destination.flush().map_err(io).unwrap_err();
+        assert_eq!(error.kind, "io");
+        assert_eq!(
+            error.message,
+            std::io::Error::from_raw_os_error(libc::ENOSPC).to_string()
+        );
+        assert!(destination.failed);
+        // Taking the parts never retries the failed tail.
+        let (_, pending) = destination.file.into_parts();
+        assert_eq!(pending.unwrap(), b"BLENDER-v405");
+    }
+
+    #[test]
+    fn buffered_spill_large_write_marks_destination_failure() {
+        let mut destination = Destination {
+            file: std::io::BufWriter::new(FailedSink),
+            failed: false,
+            available: None,
+            admitted: 0,
+        };
+        let data = vec![0; destination.file.capacity()];
+        assert!(destination.write_all(&data).is_err());
+        assert!(destination.failed);
+        let _ = destination.file.into_parts();
     }
 }
 
@@ -871,42 +972,50 @@ impl Backing {
                     file,
                     failed: &source_failed,
                 });
-                let mut destination = Destination {
-                    file: &mut decoded,
-                    failed: false,
-                    available: None,
-                    admitted: 0,
-                };
-                let result = if gzip {
-                    crate::stream_decode::decode_checked(
-                        &mut flate2::read::MultiGzDecoder::new(input),
-                        &mut destination,
-                        spill_space,
-                    )
-                } else {
-                    let mut decoder = zstd::stream::read::Decoder::new(input).map_err(|e| {
-                        Error::new(
-                            if source_failed.get() {
-                                "io"
-                            } else {
-                                "compression"
-                            },
-                            e.to_string(),
+                {
+                    let mut destination = Destination {
+                        file: std::io::BufWriter::new(&mut decoded),
+                        failed: false,
+                        available: None,
+                        admitted: 0,
+                    };
+                    let result = if gzip {
+                        crate::stream_decode::decode_checked(
+                            &mut flate2::read::MultiGzDecoder::new(input),
+                            &mut destination,
+                            spill_space,
                         )
-                    })?;
-                    crate::stream_decode::decode_checked(
-                        &mut decoder,
-                        &mut destination,
-                        spill_space,
-                    )
-                };
-                result.map_err(|e| {
-                    if destination.failed || source_failed.get() {
-                        Error::new("io", e.message)
                     } else {
-                        e
-                    }
-                })?;
+                        let mut decoder = zstd::stream::read::Decoder::new(input).map_err(|e| {
+                            Error::new(
+                                if source_failed.get() {
+                                    "io"
+                                } else {
+                                    "compression"
+                                },
+                                e.to_string(),
+                            )
+                        })?;
+                        crate::stream_decode::decode_checked(
+                            &mut decoder,
+                            &mut destination,
+                            spill_space,
+                        )
+                    };
+                    // A successful decode must deliver its buffered tail before
+                    // the backing is indexed. Never let Drop hide a write failure
+                    // or retry buffered writes after a refused/failed decode.
+                    let result = result.and_then(|()| destination.flush().map_err(io));
+                    let result = result.map_err(|e| {
+                        if destination.failed || source_failed.get() {
+                            Error::new("io", e.message)
+                        } else {
+                            e
+                        }
+                    });
+                    let _ = destination.file.into_parts();
+                    result?;
+                }
                 Ok(decoded)
             })();
             decode_span.result(decoded_result)?

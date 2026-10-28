@@ -3,7 +3,7 @@ name: oxblend
 description: "Inspects saved Blender files and their dependencies with Oxblend. Use when summarizing a .blend, finding missing files, packing for a render farm, comparing versions, repathing an image or reading EXR header values without starting Blender."
 ---
 
-# Oxblend 1.4.0
+# Oxblend 1.4.1
 
 <!-- generated-diagnosis -->
 **Diagnose does not mean repair.** `inspect`, `get`, `pointer` and `payload` describe saved bytes; they do not establish the intended scene. If trace or pack reports an invalid/unknown pointer, explain the site and stop. Do not guess a replacement pointer, null it, or bypass an Oxblend refusal with Python, hex editing or another writer unless the user explicitly authorizes a separate repair plan. Keep the original untouched. A clean trace or `complete:true` after a change proves only this command's serialized contract, not that the change is correct or that Blender can open or render it. Prefer a known-good save or repair in compatible Blender, then verify the new file natively before recommending delivery.
@@ -129,14 +129,102 @@ all four bytes including NUL padding: Scene is `53430000`, not `5343`.
 formatting. Struct names come from the SDNA type/struct tables. Do not assume
 `index`, `code`, `type`, `source_path` or `destination_path` aliases.
 
-For many reads from one input, plan once from that exact `inspect` index and run
-once: save `{"schema":1,"requests":[{"op":"inspect"},{"op":"get","block":B,"path":[...]}]}`
-as a SPEC file, then `oxblend read-batch FILE --requests SPEC > batch.jsonl`.
-Each JSONL line is one observed item in plan order plus a terminal summary with
-counts and the input check; success reports equal single-command bytes and
-failed items equal single CLI error objects exactly (no `diagnostic_ref` inside)
-with the exact invocation-local sibling `diagnostic_ref` (null or `{run_id,failure_id}`). Independent failures exit 2 with
-`incomplete_read_batch`; a source-change guard stops remaining as unobserved.
+### Plan one read batch from the saved schema
+
+Batchable today: **inspect, payload, get, pointer**. Not batchable: **query,
+overrides, list**. Discover actual saved struct names from each block's
+`sdna_index` into `sdna.structs`, then `type_index` into `sdna.types_hex`.
+Runtime names can differ: `Lamp`, not `Light`; `NodeTexSky`, not
+`NodeShaderTexSky`. Inspect the saved fields instead of guessing. An empty
+selected map is not evidence that nothing changed.
+
+This worked example runs from the repository root on the bundled native
+fixture. Set `OXBLEND` to the packaged executable; for a real input, change the
+file and selected type/paths after inspecting its schema. Union same-type
+consumers' paths into one plan, rather than opening once for each field group.
+
+```sh
+OXBLEND=${OXBLEND:-oxblend} python3 - <<'PY'
+import json, os, subprocess
+from pathlib import Path
+out = Path('.local-results/skill-batch-demo')
+out.mkdir(parents=True, exist_ok=True)
+binary, source = os.environ['OXBLEND'], 'assets/template-5.2.1.blend'
+def call(args, name, env=None):
+    with (out / (name + '.stdout')).open('wb') as stdout, (out / (name + '.stderr')).open('wb') as stderr:
+        result = subprocess.run([binary, *args], stdout=stdout, stderr=stderr, env=env)
+    (out / (name + '.exit')).write_text(str(result.returncode) + '\n')
+    return result.returncode
+assert call(['inspect', source], 'inspect') == 0
+index = json.loads((out / 'inspect.stdout').read_text())
+sdna = index['sdna']
+types = [bytes.fromhex(s).decode('utf-8', 'strict') for s in sdna['types_hex']]
+def saved_type(block):
+    return types[sdna['structs'][block['sdna_index']]['type_index']]
+print('Saved types:', sorted({saved_type(b) for b in index['blocks']}))
+paths = sorted({('id', 'name'), ('loc',)} | {('loc',), ('rot',)})
+requests = [{'op': 'inspect'}]
+selected = [i for i, block in enumerate(index['blocks']) if saved_type(block) == 'Object']
+assert selected, 'Check saved type spelling; an empty selection proves no equality'
+for i in selected:
+    requests.append({'op': 'payload', 'block': i})
+    for element in range(index['blocks'][i]['count']):
+        requests.extend({'op': 'get', 'block': i, 'element': element, 'path': list(p)} for p in paths)
+        requests.append({'op': 'pointer', 'block': i, 'element': element, 'path': ['parent']})
+spec = out / 'requests.json'
+spec.write_text(json.dumps({'schema': 1, 'requests': requests}) + '\n')
+env = dict(os.environ, FLATTRACE_DIR=str(out / 'traces'))
+status = call(['read-batch', source, '--requests', str(spec)], 'batch', env)
+rows = [json.loads(line) for line in (out / 'batch.stdout').read_text().splitlines()]
+assert rows and rows[-1].get('record_type') == 'summary', 'Missing terminal: not proven complete'
+summary, counts = rows[-1], rows[-1]['counts']
+print('exit:', status, 'counts:', counts, 'complete:', summary['complete'], 'input_changed:', summary['input_changed'])
+assert counts['total'] == len(requests)
+assert counts['observed'] == len(rows) - 1 == counts['succeeded'] + counts['failed']
+assert counts['total'] == counts['observed'] + counts['unobserved']
+assert status == 0 and summary['complete'] is True and summary['input_changed'] is False
+assert summary['input_recheck'] == summary['input']
+assert counts['failed'] == counts['unobserved'] == 0
+PY
+```
+
+The exact document shape is `{"schema":1,"requests":[...]}`. Paths contain
+field strings/array indexes, and block/element indices come from this exact
+save. The discovery open and batch are separate; if the input changes, discard
+the plan and inspect again. Success items retain the single-command `report`;
+failed items retain the exact canonical `error` plus a sibling invocation-local
+`diagnostic_ref` (null or `{run_id,failure_id}`), never inside the error.
+
+A per-item `usage` error means fix that request, not retry blindly: `inspect`
+allows only `op`; `payload` needs `block`; `get`/`pointer` need `block` and
+`path`, with optional `element`; only `get` allows exclusive `raw`, `byte_array`
+or `pointer_table`. Do not add `type`, `fields` or CLI flag keys. The current
+`unknown request field` message may not name the rejected key; inspect the
+submitted object at the failed index. Better engine messages are later work.
+Invalid top-level structure can refuse before a terminal; independent item
+errors can still deliver later items. Exit 2 / `incomplete_read_batch`, missing
+terminal, failed/unobserved items or `input_changed:true` are not complete success.
+A source guard stops remaining items as unobserved. Preserve stderr and exit.
+
+### Warnings, coverage, existence and durability are different
+
+An empty `list` map does not prove everything is embedded. Read `trace` warnings,
+`complete`, per-usage existence and missing records separately. Warnings (for
+example unknown asset families) can coexist with `complete:true`; `summary`
+success does not prove dependency closure. `missing_link_counts` is a **map**:
+its length is not the number of missing links. Inspect its keys/values and the
+actual `missing_links` records.
+
+A macOS application-bundle `assets/nodes/*.blend` library read on Linux is a
+missing dependency if absent, not absent-but-safe because it is built in on
+another platform. Locate a compatible asset and explicitly validate any remap;
+no resolver or compatibility change is implied. For packs, independently read
+planning/completeness, missing/errors/warnings, publication fields and durability.
+A written archive with `durability:none` is not an fsync guarantee and does not
+erase unknown coverage. Nonempty `FLATTRACE_DIR` activates local traces (as in
+the recipe); absent instrumentation is not proof of cheap or successful work.
+In the source checkout and CLI archive, `docs/USAGE.md` → “Single-open read
+batches” contains the shell version. The wheel's bundled skill is self-contained.
 
 ### Saved render output (recipe, not a summary field)
 

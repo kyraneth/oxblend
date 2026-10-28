@@ -305,15 +305,99 @@ No-op edits preserve physical bytes. Changed compressed inputs retain their cont
 
 ### Single-open read batches
 
+The following worked recipe runs from the repository root with the bundled
+native template. Set `OXBLEND` to the candidate packaged executable (or keep
+`oxblend` from PATH). For your own file, replace `FILE` and select fields from
+its saved schema. The discovery open is separate: its output is needed to plan
+the batch. Do not pretend that index-dependent requests were known beforehand.
+
 ```sh
-oxblend inspect scene.blend > index.json
-# Plan the exact blocks/paths from this input's index, then run once:
-cat > batch.json <<'JSON'
-{"schema":1,"requests":[{"op":"inspect"},{"op":"payload","block":0},{"op":"get","block":1,"path":["id","name"]},{"op":"pointer","block":1,"path":["parent"]}]}
-JSON
-oxblend read-batch scene.blend --requests batch.json > batch.jsonl 2> batch.stderr
-status=$?
+OXBLEND=${OXBLEND:-oxblend}
+FILE=assets/template-5.2.1.blend
+mkdir -p .local-results/read-batch-demo
+"$OXBLEND" inspect "$FILE" > .local-results/read-batch-demo/index.json 2> .local-results/read-batch-demo/inspect.stderr
+inspect_status=$?
+test "$inspect_status" -eq 0 || exit "$inspect_status"
+python3 - <<'PY'
+import json
+from pathlib import Path
+out = Path('.local-results/read-batch-demo')
+index = json.loads((out / 'index.json').read_text())
+sdna = index['sdna']
+types = [bytes.fromhex(s).decode('utf-8', 'strict') for s in sdna['types_hex']]
+def saved_type(block):
+    return types[sdna['structs'][block['sdna_index']]['type_index']]
+print('Saved types with blocks:', sorted({saved_type(b) for b in index['blocks']}))
+# Two consumers need Object fields. Union their paths once, not two opens.
+consumers = [{('id', 'name'), ('loc',)}, {('loc',), ('rot',)}]
+paths = sorted(set().union(*consumers))
+requests = [{'op': 'inspect'}]
+selected = 0
+for block_index, block in enumerate(index['blocks']):
+    if saved_type(block) != 'Object':
+        continue
+    selected += 1
+    requests.append({'op': 'payload', 'block': block_index})
+    for element in range(block['count']):
+        for path in paths:
+            requests.append({'op': 'get', 'block': block_index,
+                             'element': element, 'path': list(path)})
+        requests.append({'op': 'pointer', 'block': block_index,
+                         'element': element, 'path': ['parent']})
+assert selected, 'No saved Object blocks selected; check the actual schema/type spelling'
+(out / 'requests.json').write_text(json.dumps({'schema': 1, 'requests': requests}) + '\n')
+print('Requests:', len(requests), 'selected Object blocks:', selected)
+PY
+plan_status=$?
+test "$plan_status" -eq 0 || exit "$plan_status"
+FLATTRACE_DIR=.local-results/read-batch-demo/traces "$OXBLEND" read-batch "$FILE" --requests .local-results/read-batch-demo/requests.json > .local-results/read-batch-demo/batch.jsonl 2> .local-results/read-batch-demo/batch.stderr
+batch_status=$?
+python3 - "$batch_status" <<'PY'
+import json, sys
+from pathlib import Path
+rows = [json.loads(line) for line in Path('.local-results/read-batch-demo/batch.jsonl').read_text().splitlines()]
+assert rows and rows[-1].get('record_type') == 'summary', 'No terminal record: result is not proven complete'
+summary = rows[-1]
+counts = summary['counts']
+print('exit:', sys.argv[1], 'counts:', counts, 'complete:', summary['complete'],
+      'input_changed:', summary['input_changed'])
+assert counts['observed'] == counts['succeeded'] + counts['failed']
+assert counts['total'] == counts['observed'] + counts['unobserved']
+assert counts['observed'] == len(rows) - 1
+assert int(sys.argv[1]) == 0 and summary['complete'] is True
+assert summary['input_changed'] is False and summary['input_recheck'] == summary['input']
+assert counts['failed'] == counts['unobserved'] == 0
+PY
 ```
+
+The request document is exactly `{"schema":1,"requests":[...]}`. Batchable
+operations today are **inspect, payload, get and pointer** only. `query`,
+`overrides` and `list` are not batch operations. A same-type field union means
+one `get` request per unique field path per selected element, all in the same
+batch; it does not mean adding an unsupported `fields` key to a request.
+
+Discover saved SDNA types through `blocks[].sdna_index` → `sdna.structs[]` →
+`type_index` → `sdna.types_hex[]`, as above. Blender runtime names are not the
+serialized names: a light may be saved as `Lamp`, not `Light`, and sky-node
+storage as `NodeTexSky`, not `NodeShaderTexSky`. Inspect the actual schema and
+field declarations; do not replace names by guesswork. An empty selected map
+proves only that your selector found no records, **not** that nothing changed.
+Keep discovery and batch tied to the same unchanged input; cross-open discovery
+is not an atomic snapshot. If the file changes, discard the plan and re-inspect.
+
+A per-item `usage` error means the request is invalid, not an OOM or an unknown
+write outcome. Check the failed item index and its `error`, then repair that
+request: `inspect` allows only `op`; `payload` needs `op` and `block`;
+`pointer` needs `op`, `block`, `path` and optional `element`; `get` additionally
+allows `raw`, `byte_array` or `pointer_table` (mutually exclusive). Indices are
+nonnegative integers; paths are field strings/array indexes. Do not send CLI
+flags, a `type` selector or a `fields` union as extra keys. The current message
+may say only `unknown request field`; inspect the submitted object rather than
+assuming that message names the offending key. The engine-message improvement
+is separate future work. Invalid top-level document structure can refuse before
+any item/terminal output. Independent item errors can still produce later items;
+exit 2 and `incomplete_read_batch` are not success. A missing terminal, failed or
+unobserved items, or `input_changed:true` must not be called a complete batch.
 
 `requests` is ordered; empty arrays are valid and still prove the input
 check. Each item uses the exact single-command meanings (ELEMENT default 0,
@@ -438,6 +522,31 @@ libraries remain unprovable regardless of exclusions. Package `complete` means
 everything **in scope** was delivered; `self_contained:false` plus `excluded_count`
 (in declared usage sites) and the same pack-info facts prevent a scoped complete
 package being mistaken for a portable farm package.
+
+## Reading dependency and pack results
+
+An empty `list` map is not proof that everything is embedded. Use `trace` and
+read its warnings and coverage, then check physical existence. These are separate
+questions: warnings describe observations or unsupported families;
+`complete` describes the report's coverage; `exists`/missing records describe
+on-disk dependencies. A warning can coexist with `complete:true`, and a successful
+`summary` does not establish dependency closure. `missing_link_counts` is a
+**map**: its length counts map entries/categories, not missing links. Inspect its
+keys and numeric values alongside the actual `missing_links` records.
+
+A built-in application asset can still be a required dependency. For example, a
+saved macOS Blender application-bundle `assets/nodes/*.blend` library path may
+not exist on Linux. Report it as missing; do not declare it absent-but-safe
+because it shipped with Blender on the authoring platform. Locate a compatible
+asset and explicitly validate any remapping through the existing workflow.
+This guidance adds no resolver behavior and does not prove version compatibility.
+
+For packs, check `planning_complete`, `complete`, missing/error/warning records,
+publication fields such as `archive_written`/`output_written`, and durability
+separately. `durability:none` is not an fsync guarantee; a delivered archive does
+not erase unknown coverage or earlier warnings. Preserve stdout, stderr and exit
+together. Activate local diagnostic traces with nonempty `FLATTRACE_DIR`, as in
+the batch recipe; traces do not upgrade incomplete output to complete.
 
 ## Trace completeness and memory
 
@@ -640,7 +749,9 @@ let report = oxblend::pack::pack(&["scene.blend".into()], std::path::Path::new("
 if !report.complete { /* inspect missing and errors */ }
 ```
 
-`diff` first validates both input containers/layouts. Byte-identical files then report `equal:true`, `complete:true`, `difference_count:0` without requiring semantic identity reconstruction. Otherwise `difference_count` is the length of `differences`; unresolved allocations can still make `equal:null`, which means inconclusive, not different. A returned comparison/read error emits a v1 report with `equal:null`, `complete:false`, `errors` containing its typed kind/message, and an empty `differences` array/count 0 (no completed comparison), then exits 2. This does not change the Rust `diff::compare` returned-error API. Byte equality does not certify a valid evaluated scene.
+`diff` first validates both captured input containers/layouts. Exact decoded-byte equality (including raw/gzip/zstd without seek tables) then reports `equal:true`, `complete:true`, `difference_count:0` without requiring semantic identity reconstruction. Otherwise `difference_count` is the length of `differences`; unresolved allocations can still make `equal:null`, which means inconclusive, not different. A returned comparison/read error emits a v1 report with `equal:null`, `complete:false`, `errors` containing its typed kind/message, and an empty `differences` array/count 0 (no completed comparison), then exits 2. This does not change the Rust `diff::compare` returned-error API. Byte equality does not certify a valid evaluated scene.
+
+The additive Rust API `diff::compare_with_options(a, b, &diff::CompareOptions { temp_root })` chooses one frozen scratch directory for both input opens. Legacy `diff::compare`, the CLI and Python resolve the process temp directory (`TMPDIR` on Linux, or the platform default) once per comparison. There is no report spool yet. The root is used for spills, not prevalidated for raw inputs. Decoded spills are unnamed and close with the operation. Captured descriptors prevent path replacement from switching generations; replacement may conservatively refuse if unlinking changes the captured inode's ctime. Detected in-place changes refuse with `input_changed`. Validation and comparison read the inputs in full on equality; no sublinear reading is promised.
 
 Native Blender readback and evaluated/render behavior are separate from these serialized guarantees. See [verification](MAINTAINING.md).
 

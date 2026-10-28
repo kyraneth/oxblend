@@ -118,6 +118,12 @@ pub(crate) struct ProgramSite {
     pub(crate) offset: usize,
 }
 impl ProgramSite {
+    pub(crate) fn template_index(&self) -> usize {
+        self.site
+    }
+    pub(crate) fn record_index(&self) -> usize {
+        self.record
+    }
     pub(crate) fn layout(&self) -> PointerLayout {
         let template = &self.program[self.site];
         let mut field = template.clone();
@@ -308,18 +314,32 @@ pub(crate) fn checked_pointer_census(f: &BlendFile) -> Result<Census> {
     f.owner_index()?.admit_write(f)?;
     census(f, validate::write_site)
 }
-fn census(
+// S3 unified base traversal: single owner of pointer iteration plus validation.
+// Both the compatibility Census and the diff compact collector share this walker;
+// admission (qualify_read / admit_write) stays with each caller.
+fn for_each_base_site(
     f: &BlendFile,
     validate: fn(&BlendFile, usize, &PointerLayout, u64) -> Result<Option<usize>>,
-) -> Result<Census> {
+    mut visit: impl FnMut(
+        usize,
+        Option<usize>,
+        usize,
+        usize,
+        usize,
+        PointerLayout,
+        u64,
+        Option<(usize, usize)>,
+        &'static str,
+    ),
+) -> Result<(Vec<Option<usize>>, Vec<usize>)> {
     let index = f.owner_index()?;
-    let mut sites = Vec::new();
+    let owners = index.owners(f);
     let mut opaque = Vec::new();
     for (i, b) in f.blocks().iter().enumerate() {
         if b.code == *b"DNA1" {
             continue;
         }
-        let Some(layout) = pointer_layout(f, i)? else {
+        let Some(sites) = pointer_sites(f, i)? else {
             opaque.push(i);
             continue;
         };
@@ -328,32 +348,159 @@ fn census(
         // block. Guards and byte identity match `payload()`.
         let view = f.payload_view(i)?;
         let payload = view.as_slice();
-        for field in layout {
+        for site in sites {
+            let template = site.template_index();
+            let record = site.record_index();
+            let offset = site.offset;
+            let layout = site.layout();
             let address = number(
                 payload,
-                field.offset,
+                offset,
                 f.header().pointer_size,
                 f.header().little_endian,
             )?;
-            let (target, state) = match validate(f, i, &field, address) {
+            let (target, state) = match validate(f, i, &layout, address) {
                 Ok(Some(target)) => (Some((target, 0)), "resolved"),
                 Ok(None) => (None, "null"),
                 Err(e) => (None, e.kind),
             };
+            visit(
+                i, owners[i], template, record, offset, layout, address, target, state,
+            );
+        }
+    }
+    Ok((owners, opaque))
+}
+// Compact diff edge: source-schema handles, no per-site owned path/type.
+// Base edges reference their schema program template plus record; expanded
+// array elements reference their parent edge. Paths/types render on demand.
+pub(crate) const COMPACT_EXPANDED_TEMPLATE: usize = usize::MAX;
+pub(crate) const COMPACT_BASE_PARENT: usize = usize::MAX;
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CompactSite {
+    pub block: usize,
+    pub offset: usize,
+    pub address: u64,
+    pub target: Option<(usize, usize)>,
+    // Retained evidence is checked by compact_retention_accounting even when
+    // the report does not consume the state/type of every compact edge.
+    #[allow(
+        dead_code,
+        reason = "preserved pointer-state evidence for retention qualification"
+    )]
+    pub state: &'static str,
+    pub template: usize,
+    pub record: usize,
+    #[allow(
+        dead_code,
+        reason = "preserved expanded-edge declared-type parent handle"
+    )]
+    pub parent: usize,
+}
+pub(crate) fn compact_template(
+    f: &BlendFile,
+    block: usize,
+    template: usize,
+) -> Result<&PointerLayout> {
+    let si = f.struct_index(block)?;
+    let cell = f
+        .schema()
+        .pointer_programs
+        .get(si)
+        .ok_or_else(|| Error::new("diff_extent", "schema program absent"))?;
+    let cached = cell
+        .get()
+        .ok_or_else(|| Error::new("diff_extent", "schema program not built"))?;
+    let program = cached
+        .as_ref()
+        .map_err(|e| Error::new(e.kind, e.message.clone()))?;
+    program
+        .get(template)
+        .ok_or_else(|| Error::new("diff_extent", "schema template out of range"))
+}
+pub(crate) fn compact_path(f: &BlendFile, edges: &[CompactSite], idx: usize) -> Result<String> {
+    let edge = &edges[idx];
+    if edge.template != COMPACT_EXPANDED_TEMPLATE {
+        let template = compact_template(f, edge.block, edge.template)?;
+        Ok(format!("[{0}]{1}", edge.record, template.path))
+    } else {
+        Ok(format!("[{0}]", edge.record))
+    }
+}
+#[allow(
+    dead_code,
+    reason = "retained declared-type evidence checked by qualification"
+)]
+pub(crate) fn compact_declared<'a>(
+    f: &'a BlendFile,
+    edges: &[CompactSite],
+    idx: usize,
+) -> Result<&'a [u8]> {
+    let edge = &edges[idx];
+    if edge.template != COMPACT_EXPANDED_TEMPLATE {
+        Ok(compact_template(f, edge.block, edge.template)?
+            .declared_type
+            .as_slice())
+    } else {
+        let parent = edges
+            .get(edge.parent)
+            .ok_or_else(|| Error::new("diff_extent", "expanded parent absent"))?;
+        debug_assert!(parent.template != COMPACT_EXPANDED_TEMPLATE);
+        Ok(compact_template(f, parent.block, parent.template)?
+            .declared_type
+            .as_slice())
+    }
+}
+/// Diff compact base collection with the compatibility qualify_read boundary.
+/// Shares for_each_base_site with Census; no duplicated resolver.
+type CompactBase = (Vec<Option<usize>>, Vec<CompactSite>, Vec<usize>);
+pub(crate) fn collect_compact_base(f: &BlendFile) -> Result<CompactBase> {
+    owner::qualify_read(f)?;
+    let mut edges = Vec::new();
+    let (owners, opaque) = for_each_base_site(
+        f,
+        validate::census_site,
+        |block, _owner, template, record, offset, _layout, address, target, state| {
+            edges.push(CompactSite {
+                block,
+                offset,
+                address,
+                target,
+                state,
+                template,
+                record,
+                parent: COMPACT_BASE_PARENT,
+            });
+        },
+    )?;
+    Ok((owners, edges, opaque))
+}
+fn census(
+    f: &BlendFile,
+    validate: fn(&BlendFile, usize, &PointerLayout, u64) -> Result<Option<usize>>,
+) -> Result<Census> {
+    let mut sites = Vec::new();
+    let (owners, opaque) = for_each_base_site(
+        f,
+        validate,
+        |block, owner, _template, _record, _offset, layout, address, target, state| {
+            let offset = layout.offset;
+            let path = layout.path;
+            let declared_type = layout.declared_type;
             sites.push(PointerSite {
-                block: i,
-                owner: index.owner(f, i),
-                offset: field.offset,
-                path: field.path,
-                declared_type: field.declared_type,
+                block,
+                owner,
+                offset,
+                path,
+                declared_type,
                 address,
                 target,
                 state,
             });
-        }
-    }
+        },
+    )?;
     Ok(Census {
-        owners: index.owners(f),
+        owners,
         sites,
         opaque,
     })
